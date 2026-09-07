@@ -340,9 +340,9 @@ battery identity. It is the reason this driver publishes a neutral
 
 ```sh
 cd /data
-wget -O deye.tar.gz https://github.com/<you>/deye-virtual-battery/archive/refs/heads/main.tar.gz
+wget -O deye.tar.gz https://github.com/vladyspavlov/dbus-deye-battery/archive/refs/heads/main.tar.gz
 tar xzf deye.tar.gz
-cd deye-virtual-battery-main
+cd dbus-deye-battery-main
 sh install/install.sh
 ```
 
