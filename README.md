@@ -55,18 +55,6 @@ are responsible for your own system.
 **Two conductors. Deye pin 4 → Victron pin 7, Deye pin 5 → Victron pin 8.**
 The pin numbers differ on each side, so a straight-through cable is wrong.
 
-### RJ45 pin numbering
-
-Hold the plug with the **gold contacts facing you** and the **locking clip
-pointing down**. Pin 1 is then on the left:
-
-```
-              ┌─┬─┬─┬─┬─┬─┬─┬─┐
-              │1│2│3│4│5│6│7│8│      gold contacts toward you
-              └─┴─┴─┴─┴─┴─┴─┴─┘
-                     ╨              clip underneath, pointing down
-```
-
 ### The only two connections that may exist
 
 ```
