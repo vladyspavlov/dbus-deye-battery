@@ -3,6 +3,21 @@
 Versions are strictly numeric: Venus OS and VRM display `/Mgmt/ProcessVersion`
 verbatim, so no suffixes or build tags appear here.
 
+## 0.7.3
+
+### Added
+- The pack serial on the standard Venus `/Serial` path, joined from `0x600`
+  and `0x650`, registered once at qualification as a fixed path so the update
+  loop can never change its D-Bus type.
+- `identity.pack_firmware_marker` / `victron_identity.firmware_marker`,
+  rendering the version word as the vendor's own `F` designation (`F005`)
+  rather than the raw integer `1520`.
+- A wiring danger notice in the README. Only Deye PCS pins 4 and 5 may be
+  connected, crossed to Victron BMS-Can pins 7 and 8; a straight-through
+  patch cable puts CAN levels onto the battery's RS485 pins.
+- The Deye Cloud firmware-update procedure, and a note that SE-F5-C and
+  SE-F16-C are untested but likely compatible.
+
 ## 0.7.2
 
 First public release.

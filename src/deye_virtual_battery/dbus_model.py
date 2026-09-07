@@ -56,7 +56,7 @@ def build_mock_dbus_model(
         "/ProductName": "Deye SE-F12-C",
         "/CustomName": "Deye SE-F12-C (shadow)",
         "/Manufacturer": "Deye",
-        "/Serial": _serial(fields),
+        "/Serial": serial_number(fields),
         "/DeviceInstance": config.device_instance,
         "/Connected": 1 if ready else 0,
         "/Dc/0/Voltage": voltage,
@@ -194,7 +194,7 @@ def _profile_value(snapshot: dict[str, Any], key: str) -> Any:
     return profile.get(key) if isinstance(profile, dict) else None
 
 
-def _serial(fields: dict[str, Any]) -> str | None:
+def serial_number(fields: dict[str, Any]) -> str | None:
     """Join the pack serial, which arrives split across two CAN frames.
 
     ``0x600`` carries the first eight characters and ``0x650`` the second

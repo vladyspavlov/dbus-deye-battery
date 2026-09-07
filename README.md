@@ -34,6 +34,51 @@ are responsible for your own system.
 
 ---
 
+## ☠️ DANGER — the CAN cable is not a straight-through Ethernet cable
+
+**Using an ordinary patch cable between the Deye PCS port and Victron BMS-Can
+will put Victron's CAN signals onto the battery's RS485 pins and can destroy
+the battery BMS.** Only pins 4 and 5 on the Deye side may be connected.
+
+Confirmed from both vendors' own documentation:
+
+| | pin 1 | pin 2 | pin 3 | **pin 4** | **pin 5** | pin 6 | pin 7 | pin 8 |
+|---|---|---|---|---|---|---|---|---|
+| **Deye PCS port** | 485-B | 485-A | – | **CANH** | **CANL** | – | 485-A | 485-B |
+| **Victron BMS-Can** | – | – | GND | – | – | – | **CAN-H** | **CAN-L** |
+
+Only two conductors, crossed 4→7 and 5→8:
+
+```
+      DEYE  "PCS" port                      VICTRON  BMS-Can
+      (RJ45)                                (RJ45)
+
+   1  485-B   ○      ✗ leave unconnected       ○  1
+   2  485-A   ○      ✗ leave unconnected       ○  2
+   3   --     ○      ✗ leave unconnected       ○  3  GND
+   4  CANH    ●──────────────┐                 ○  4
+   5  CANL    ●───────────┐  │                 ○  5
+   6   --     ○      ✗    │  │                 ○  6
+   7  485-A   ○      ✗    │  └───────────────► ●  7  CAN-H
+   8  485-B   ○      ✗    └──────────────────► ●  8  CAN-L
+
+        ● = connected        ○ = MUST stay unconnected
+```
+
+**Why a straight-through cable is destructive:** Victron drives CAN-H on pin 7
+and CAN-L on pin 8. Straight through, those land on Deye pins 7 and 8 — which
+are **485-A and 485-B**. That feeds CAN transceiver levels straight into the
+battery's RS485 transceiver.
+
+Use the battery's `PCS` port, not `IN` or `OUT`. The `IN`/`OUT` ports are for
+battery-to-battery parallel links and have a completely different pinout
+(CANL/CANH on pins 1/2 and 7/8).
+
+Terminate the bus per
+[Victron's cable guidance](https://www.victronenergy.com/live/battery_compatibility:can-bus_bms-cable).
+
+---
+
 ## What it does
 
 - Decodes the Deye PCS CAN protocol from a passively observed SocketCAN
@@ -80,9 +125,15 @@ are responsible for your own system.
 | Venus OS | v3.75, armv7l, Python 3.12 |
 | Bus | BMS-Can, 500 kbit/s, classical 11-bit frames |
 
-Other SE-F12 variants very likely work; other Deye families are unverified.
-If you run it on something else, please open an issue with a `candump` log —
-that is the single most useful thing you can contribute.
+**Not tested, but likely compatible:** the **SE-F5-C** and **SE-F16-C** are
+the same SE-F series with the same PCS interface, so they almost certainly
+speak the same protocol — only the cell count and capacity should differ. The
+driver reads capacity from the battery rather than assuming it, so it should
+adapt. Nobody has confirmed this on hardware.
+
+Other Deye families are unverified. If you run it on anything other than an
+SE-F12-C, please open an issue with a `candump` log — that is the single most
+useful thing you can contribute.
 
 ---
 
@@ -103,7 +154,38 @@ This driver decodes that condition rather than hiding it —
 `/Alarms/HighDischargeCurrent` level 2 — so if it ever does fire you can see it
 in Venus instead of inferring it from an outage.
 
-The update on the reference pack, applied over the air from the battery app:
+### How the firmware update is done
+
+Over the air from the **Deye Cloud** app, over Bluetooth — not from the
+inverter or the GX. The SE-F12 manual confirms the transport but not the
+procedure:
+
+> *"As your device is designed to possess Bluetooth function, it can connect to
+> the Deye Cloud App via Bluetooth. Following successful login and
+> registration, users can retrieve information about battery packs or the
+> entire system."*
+> — Deye SE-F12 user manual, issue 05
+
+The manual stops there, so the rest is from doing it:
+
+1. Open **Deye Cloud**, sign in.
+2. **Three dots, top right → Local mode.**
+3. Pick the device beginning with **`BAT…`** — that is the battery, not the
+   inverter.
+4. When it asks for a QR code, **the code is the battery's own serial
+   number**, printed on the pack label. The manual documents no QR code for
+   this step — its QR code points at the app operation manual instead — so if
+   you cannot scan the label, entering the serial is what works.
+5. Choose the OTA image and keep the app in the foreground until it finishes.
+
+The battery restarts at the end. Expect roughly a 15-second gap in CAN frames
+while it does, which the driver rides out as normal staleness.
+
+> **Do not update while the battery is the only source of power.** The BMS
+> restarts, and this driver's limits go stale during the gap. Do it on grid,
+> with the inverter able to keep the loads up without the battery.
+
+The update on the reference pack:
 
 | | |
 |---|---|

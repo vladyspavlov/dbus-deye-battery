@@ -165,6 +165,7 @@ def _fixed_paths(
     *,
     can_tx_enabled: bool = False,
     interface: str = "can0",
+    serial: str | None = None,
 ) -> dict[str, Any]:
     return {
         "/Mgmt/ProcessName": __file__,
@@ -177,6 +178,11 @@ def _fixed_paths(
         "/ProductName": "Deye SE-F12-C",
         "/CustomName": "Deye SE-F12-C",
         "/Manufacturer": "Deye",
+        # Device information, registered once at qualification and never
+        # updated.  Keeping it out of the dynamic set means the update loop
+        # can never change its D-Bus type, and an absent serial stays the
+        # invalid value rather than appearing later as a different type.
+        "/Serial": serial,
         "/FirmwareVersion": PROCESS_VERSION,
         "/HardwareVersion": "SE-F12-C",
         "/Capabilities/ChargeVoltageControl": 0,
@@ -205,8 +211,11 @@ def _add_paths(
     can_tx_enabled: bool = False,
     transmitter_snapshot: KeepaliveSnapshot | None = None,
     interface: str = "can0",
+    serial: str | None = None,
 ) -> set[str]:
-    fixed = _fixed_paths(config, can_tx_enabled=can_tx_enabled, interface=interface)
+    fixed = _fixed_paths(
+        config, can_tx_enabled=can_tx_enabled, interface=interface, serial=serial
+    )
     for path, value in fixed.items():
         service.add_path(path, value)
     dynamic_paths: set[str] = set()
@@ -321,6 +330,7 @@ def run(arguments: argparse.Namespace) -> int:
             can_tx_enabled=arguments.allow_can_transmit,
             transmitter_snapshot=transmitter.snapshot(),
             interface=arguments.interface,
+            serial=core.last_model["paths"].get("/Serial"),
         )
         service.register()
         main_loop = GLib.MainLoop()

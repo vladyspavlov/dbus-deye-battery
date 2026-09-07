@@ -144,3 +144,32 @@ def test_no_subcommand_prints_the_serial_by_default():
 def test_show_serial_opts_back_in():
     serial = build_mock_dbus_model(replay([SAMPLE], 230.0).snapshot())["paths"]["/Serial"]
     assert serial in json.loads(run_cli("model", "--show-serial", str(SAMPLE)))["paths"]["/Serial"]
+
+
+def test_serial_is_registered_once_and_never_rewritten():
+    """A path the update loop rewrites could change D-Bus type mid-flight.
+
+    The serial is static device information, so it is registered at
+    qualification from the qualified model and then left alone.
+    """
+    from deye_virtual_battery.policy import PolicyConfig
+    from deye_virtual_battery.venus_bms_publisher import _add_paths, _fixed_paths
+
+    class FakeService:
+        def __init__(self):
+            self.paths = {}
+
+        def add_path(self, path, value):
+            self.paths[path] = value
+
+    service = FakeService()
+    dynamic = _add_paths(
+        service,
+        {"/Serial": "IGNORED", "/Soc": 100.0},
+        config=PolicyConfig(),
+        serial="DEYE12345678ABCD",
+    )
+    assert service.paths["/Serial"] == "DEYE12345678ABCD"
+    assert "/Serial" not in dynamic
+    assert "/Soc" in dynamic
+    assert _fixed_paths(PolicyConfig())["/Serial"] is None
