@@ -83,6 +83,63 @@ that is the single most useful thing you can contribute.
 
 ---
 
+## Field notes from the reference installation
+
+### Update the BMS firmware before anything else
+
+On its original firmware this pack intermittently tripped an **AFE
+short-circuit-discharge protection (AFE-SCD)** with no real fault present. The
+BMS opened its discharge path, the battery dropped off the bus, and the Victron
+shut down as a consequence. Updating the BMS firmware stopped it.
+
+If you are chasing unexplained dropouts on an SE-F12, do the firmware update
+before suspecting your cabling, your GX, or a driver.
+
+This driver decodes that condition rather than hiding it —
+`afe_short_circuit_discharge` and its latched variant both publish as
+`/Alarms/HighDischargeCurrent` level 2 — so if it ever does fire you can see it
+in Venus instead of inferring it from an outage.
+
+The firmware is visible on the wire in `0x500`. On the reference pack the
+decoded `identity.pack_software_version_raw` read **752** before the update and
+**1520** after, with `identity.boot_version` unchanged at `V1.0F`. Replay a
+capture through `tools/validate_real_captures.py` to read yours.
+
+### The newer firmware adds CAN protocol selection
+
+The battery gained a selectable inverter protocol. The default is `Sol-ark`;
+`victronCAN` is the alternative. The reference installation runs `victronCAN`.
+
+The two are not cosmetic variants. `victronCAN` drops `0x359`, `0x35C`,
+`0x361`, `0x363`, `0x364` and `0x371`, adds Victron's `0x35A` and `0x35F`,
+changes the `0x35E` identity to `PYLON`, and **inverts the sign of the current
+in `0x356`**. A driver that assumes one profile will report charge as discharge
+on the other.
+
+This driver detects the active profile from the frames themselves, so both
+settings work and switching between them needs no reconfiguration. Switching is
+a live control change on a running system, so do it deliberately.
+
+One caveat worth knowing before you switch: on this pack **every `0x35A` field
+reports "not supported"**, so `victronCAN` does not actually give you working
+Victron-standard alarms. The Deye `0x110` condition tables remain the real
+alarm source, which is why this driver keeps decoding them in both profiles.
+
+### Firmware alone was not the whole story
+
+The AFE-SCD dropouts stopped after the update. A separate effect did not: with
+the pack full and its charge MOS open, the battery is decoupled from the
+inverter DC bus, and during large load steps VE.Bus briefly reports a DC
+voltage several volts above the battery's own reading. Those excursions
+continued after the firmware update.
+
+They appear harmless in themselves — but a brief high reading is exactly what
+vendor-specific Venus protection logic reacts to, and that logic binds on
+battery identity. It is the reason this driver publishes a neutral
+`ProductId 0xFFFF`.
+
+---
+
 ## Installation
 
 ### 0. Prerequisites
