@@ -25,6 +25,7 @@ import sys
 import time
 from typing import Any, Callable
 
+from .version import VERSION
 from .policy import PolicyConfig
 from .venus_discovery import VebusLocator, discover_vebus_service
 from .venus_runtime import (
@@ -137,7 +138,7 @@ def _add_paths(
 ) -> set[str]:
     fixed = {
         "/Mgmt/ProcessName": __file__,
-        "/Mgmt/ProcessVersion": "0.4.0-stage",
+        "/Mgmt/ProcessVersion": f"{VERSION}-stage",
         "/Mgmt/Connection": "passive SocketCAN can0 (no-control stage)",
         "/DeviceInstance": DEVICE_INSTANCE,
         "/ProductId": 0xFFFF,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .version import VERSION
 from .policy import PolicyConfig, evaluate_policy
 
 
@@ -50,7 +51,7 @@ def build_mock_dbus_model(
     )
     paths: dict[str, Any] = {
         "/Mgmt/ProcessName": "deye-virtual-battery-shadow",
-        "/Mgmt/ProcessVersion": "0.3.0-shadow",
+        "/Mgmt/ProcessVersion": f"{VERSION}-shadow",
         "/Mgmt/Connection": "recorded Deye PCS CAN (PC-only mock)",
         "/ProductId": config.product_id,
         "/ProductName": "Deye SE-F12-C",

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deye-virtual-battery"
-version = "0.7.2"
+version = "0.7.3"
 description = "Deye SE-F12-C battery adapter for Victron Venus OS (BMS-Can)"
 readme = "README.md"
 license = "Apache-2.0"

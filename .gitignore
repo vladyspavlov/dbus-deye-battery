@@ -18,3 +18,7 @@ tests/data/private/
 .env
 .env.*
 *:Zone.Identifier
+
+# VE.Bus / VEConfigure exports. The filename alone carries the site owner's
+# name and the VE.Bus instance id.
+*.rvsc
