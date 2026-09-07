@@ -1,0 +1,24 @@
+#!/bin/sh
+# Re-create the service symlink after a reboot or a Venus OS firmware update.
+# /service lives on a tmpfs, so the link does not survive; /data does.
+
+service_source=/data/deye-virtual-battery/service
+service_runtime=/service/deye-virtual-battery
+
+[ -d "$service_source" ] || exit 0
+
+if [ ! -e "$service_runtime" ] && [ ! -L "$service_runtime" ]; then
+    ln -s "$service_source" "$service_runtime"
+fi
+
+if [ -L "$service_runtime" ] && [ "$(readlink "$service_runtime")" = "$service_source" ]; then
+    svc -u "$service_runtime" >/dev/null 2>&1 || true
+fi
+
+# Only re-take CAN ownership if the operator previously enabled it.
+if [ -f /data/deye-virtual-battery/can-tx-enabled ]; then
+    nohup /data/deye-virtual-battery/service/handoff-can-owner --boot \
+        >> /data/log/deye-virtual-battery/boot-handoff.log 2>&1 &
+fi
+
+exit 0

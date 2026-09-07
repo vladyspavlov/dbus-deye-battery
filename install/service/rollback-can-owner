@@ -1,0 +1,55 @@
+#!/bin/sh
+set -eu
+
+root=/data/deye-virtual-battery
+
+SERVICE_NAME=com.victronenergy.battery.deye_se_f12
+CAN_INTERFACE=can0
+
+# shellcheck source=/dev/null
+[ -f "$root/config" ] && . "$root/config"
+
+virtual_service=$SERVICE_NAME
+stock_service=/service/can-bus-bms.$CAN_INTERFACE
+arm_file=/run/deye-virtual-battery/tx-armed
+persistent_marker=/data/deye-virtual-battery/can-tx-enabled
+
+read_value() {
+    dbus -y "$1" "$2" GetValue 2>/dev/null | sed 's/^value = //'
+}
+
+stock_process_running() {
+    for process in /proc/[0-9]*; do
+        [ -e "$process/exe" ] || continue
+        executable=$(readlink "$process/exe" 2>/dev/null || true)
+        [ "$executable" = "/opt/victronenergy/can-bus-bms/can-bus-bms" ] && return 0
+    done
+    return 1
+}
+
+rm -f "$persistent_marker" "$arm_file"
+
+attempt=0
+while [ "$attempt" -lt 20 ]; do
+    owner=$(read_value "$virtual_service" /Diagnostics/CanTx/Owner || true)
+    [ "$owner" = "0" ] && break
+    attempt=$((attempt + 1))
+    sleep 0.1
+done
+[ "$(read_value "$virtual_service" /Diagnostics/CanTx/Owner)" = "0" ]
+
+svc -u "$stock_service"
+
+attempt=0
+while [ "$attempt" -lt 40 ]; do
+    stock=$(read_value "$virtual_service" /Diagnostics/CanTx/StockDriverRunning || true)
+    if [ "$stock" = "1" ] && stock_process_running; then
+        echo "rollback complete: stock driver owns Deye keepalive"
+        exit 0
+    fi
+    attempt=$((attempt + 1))
+    sleep 0.1
+done
+
+echo "rollback failed: stock driver did not return" >&2
+exit 5

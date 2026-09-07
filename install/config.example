@@ -1,0 +1,21 @@
+# Copy to /data/deye-virtual-battery/config and edit.
+# Every value is optional; the defaults below are what the service uses.
+
+# CAN interface the battery is wired to.  On many GX devices BMS-Can is can0;
+# on a Cerbo GX with both VE.Can and BMS-Can it is often can1.  Check with
+# "ip -details link show" and confirm the bitrate is 500000.
+CAN_INTERFACE=can0
+
+# D-Bus identity.  Change both only if you run more than one pack.
+SERVICE_NAME=com.victronenergy.battery.deye_se_f12
+DEVICE_INSTANCE=513
+
+# VE.Bus service used for the DC voltage cross-check.  Leave empty to discover
+# it automatically, which is correct for almost every installation.
+VEBUS_SERVICE=
+
+# Seconds of valid CAN data required before the service registers on D-Bus.
+QUALIFICATION_SECONDS=10
+
+# INFO or DEBUG.
+LOG_LEVEL=INFO

@@ -1,0 +1,148 @@
+#!/bin/sh
+set -eu
+
+root=/data/deye-virtual-battery
+
+SERVICE_NAME=com.victronenergy.battery.deye_se_f12
+DEVICE_INSTANCE=513
+CAN_INTERFACE=can0
+VEBUS_SERVICE=
+
+# shellcheck source=/dev/null
+[ -f "$root/config" ] && . "$root/config"
+
+virtual_service=$SERVICE_NAME
+device_instance=$DEVICE_INSTANCE
+stock_service=/service/can-bus-bms.$CAN_INTERFACE
+runtime_dir=/run/deye-virtual-battery
+arm_file=$runtime_dir/tx-armed
+persistent_marker=/data/deye-virtual-battery/can-tx-enabled
+boot_mode=0
+
+if [ "${1:-}" = "--boot" ]; then
+    boot_mode=1
+elif [ -n "${1:-}" ]; then
+    echo "unsupported argument: $1" >&2
+    exit 2
+fi
+
+read_value() {
+    dbus -y "$1" "$2" GetValue 2>/dev/null | sed 's/^value = //'
+}
+
+# The VE.Bus service name embeds the port the inverter is attached to, which
+# differs between GX models.  Resolve it once instead of assuming one.
+discover_vebus() {
+    [ -n "$VEBUS_SERVICE" ] && { echo "$VEBUS_SERVICE"; return 0; }
+    dbus -y 2>/dev/null \
+        | tr -d "\r" \
+        | sed -n 's/.*\(com\.victronenergy\.vebus\.[A-Za-z0-9_]*\).*/\1/p' \
+        | sort -u \
+        | head -1
+}
+
+vebus_service=$(discover_vebus)
+if [ -z "$vebus_service" ]; then
+    echo "no VE.Bus service found on D-Bus; set VEBUS_SERVICE in $root/config" >&2
+    exit 4
+fi
+
+number_between() {
+    awk -v value="$1" -v minimum="$2" -v maximum="$3" 'BEGIN {
+        if (value !~ /^-?[0-9]+([.][0-9]+)?$/) exit 1
+        exit !(value >= minimum && value <= maximum)
+    }'
+}
+
+publisher_progressing() {
+    first=$(read_value "$virtual_service" /Diagnostics/Publisher/Heartbeat || true)
+    sleep 1
+    second=$(read_value "$virtual_service" /Diagnostics/Publisher/Heartbeat || true)
+    number_between "$first" 0 2147483647 &&
+    number_between "$second" 1 2147483647 &&
+    [ "$second" -gt "$first" ]
+}
+
+preconditions_ready() {
+    can_age=$(read_value "$virtual_service" /Diagnostics/Lifecycle/CanAge || true)
+    dcl=$(read_value "$virtual_service" /Info/MaxDischargeCurrent || true)
+    ac_out=$(read_value "$vebus_service" /Ac/Out/L1/V || true)
+    [ "$(read_value com.victronenergy.settings /Settings/SystemSetup/BmsInstance || true)" = "$device_instance" ] &&
+    [ "$(read_value com.victronenergy.system /ActiveBmsInstance || true)" = "$device_instance" ] &&
+    [ "$(read_value "$virtual_service" /Connected || true)" = "1" ] &&
+    [ "$(read_value "$virtual_service" /Diagnostics/CanTx/FeatureEnabled || true)" = "1" ] &&
+    [ "$(read_value "$virtual_service" /Diagnostics/Lifecycle/State || true)" = "'online'" ] &&
+    [ "$(read_value "$virtual_service" /Diagnostics/Lifecycle/CanAlive || true)" = "1" ] &&
+    [ "$(read_value "$virtual_service" /Diagnostics/Alarms/CriticalDataStale || true)" = "0" ] &&
+    [ "$(read_value "$virtual_service" /Io/AllowToDischarge || true)" = "1" ] &&
+    [ "$(read_value "$virtual_service" /Alarms/HighDischargeCurrent || true)" = "0" ] &&
+    [ "$(read_value "$virtual_service" /Alarms/InternalFailure || true)" = "0" ] &&
+    [ "$(read_value "$vebus_service" /Mode || true)" = "3" ] &&
+    [ "$(read_value "$vebus_service" /VebusError || true)" = "0" ] &&
+    [ "$(read_value "$vebus_service" /Alarms/LowBattery || true)" = "0" ] &&
+    number_between "$can_age" 0 2 &&
+    number_between "$dcl" 0.1 230 &&
+    number_between "$ac_out" 180 260
+}
+
+attempt=0
+maximum_attempts=1
+if [ "$boot_mode" -eq 1 ]; then
+    maximum_attempts=60
+fi
+while ! preconditions_ready || ! publisher_progressing; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge "$maximum_attempts" ]; then
+        echo "handoff refused: virtual BMS is not selected, fresh, progressing, and TX-capable" >&2
+        exit 3
+    fi
+    sleep 1
+done
+
+[ "$(read_value "$virtual_service" /Diagnostics/CanTx/Owner)" = "0" ]
+[ "$(read_value "$virtual_service" /Diagnostics/CanTx/StockDriverRunning)" = "1" ]
+
+mkdir -p "$runtime_dir"
+chmod 0755 "$runtime_dir"
+
+handoff_started=0
+rollback_on_failure() {
+    status=$?
+    trap - EXIT HUP INT TERM
+    if [ "$handoff_started" -eq 1 ]; then
+        rm -f "$arm_file"
+        svc -u "$stock_service" >/dev/null 2>&1 || true
+    fi
+    exit "$status"
+}
+trap rollback_on_failure EXIT HUP INT TERM
+
+touch "$arm_file"
+chmod 0600 "$arm_file"
+handoff_started=1
+svc -d "$stock_service"
+
+attempt=0
+while [ "$attempt" -lt 40 ]; do
+    owner=$(read_value "$virtual_service" /Diagnostics/CanTx/Owner || true)
+    pairs=$(read_value "$virtual_service" /Diagnostics/CanTx/PairsSent || true)
+    errors=$(read_value "$virtual_service" /Diagnostics/CanTx/Errors || true)
+    connected=$(read_value "$virtual_service" /Connected || true)
+    can_alive=$(read_value "$virtual_service" /Diagnostics/Lifecycle/CanAlive || true)
+    stale=$(read_value "$virtual_service" /Diagnostics/Alarms/CriticalDataStale || true)
+    if [ "$owner" = "1" ] && [ "${pairs:-0}" -gt 0 ] &&
+        [ "${errors:-1}" -eq 0 ] && [ "$connected" = "1" ] &&
+        [ "$can_alive" = "1" ] && [ "$stale" = "0" ]; then
+        touch "$persistent_marker"
+        chmod 0600 "$persistent_marker"
+        handoff_started=0
+        trap - EXIT HUP INT TERM
+        echo "handoff complete: virtual driver owns Deye keepalive"
+        exit 0
+    fi
+    attempt=$((attempt + 1))
+    sleep 0.1
+done
+
+echo "handoff failed: virtual transmitter did not prove ownership" >&2
+exit 4

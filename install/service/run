@@ -1,0 +1,32 @@
+#!/bin/sh
+# runit/daemontools run script for the Deye virtual battery service.
+exec 2>&1
+
+root=/data/deye-virtual-battery
+
+CAN_INTERFACE=can0
+SERVICE_NAME=com.victronenergy.battery.deye_se_f12
+DEVICE_INSTANCE=513
+VEBUS_SERVICE=
+QUALIFICATION_SECONDS=10
+LOG_LEVEL=INFO
+
+# shellcheck source=/dev/null
+[ -f "$root/config" ] && . "$root/config"
+
+set -- \
+    --interface "$CAN_INTERFACE" \
+    --service-name "$SERVICE_NAME" \
+    --device-instance "$DEVICE_INSTANCE" \
+    --qualification-seconds "$QUALIFICATION_SECONDS" \
+    --log-level "$LOG_LEVEL"
+
+[ -n "$VEBUS_SERVICE" ] && set -- "$@" --vebus-service "$VEBUS_SERVICE"
+
+# The keepalive transmitter stays inert unless the operator has explicitly
+# handed CAN ownership over with install/service/handoff-can-owner, which
+# creates this marker.  Installing the package never starts transmitting.
+[ -f "$root/can-tx-enabled" ] && set -- "$@" --allow-can-transmit
+
+exec env PYTHONPATH="$root/src" \
+    python3 -u -m deye_virtual_battery.venus_bms_publisher "$@"

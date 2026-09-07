@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deye-virtual-battery"
+version = "0.7.2"
+description = "Deye SE-F12-C battery adapter for Victron Venus OS (BMS-Can)"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+keywords = ["victron", "venus-os", "deye", "can", "bms", "battery", "solar"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Home Automation",
+]
+# No third-party runtime dependencies.  On a GX device the adapter imports
+# dbus, gi and vedbus from the Venus OS installation itself; off-device the
+# decoder, policy and replay layers run on the standard library alone.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+deye-shadow = "deye_virtual_battery.cli:main"
+deye-venus-stage = "deye_virtual_battery.venus_stage_publisher:main"
+deye-venus-bms = "deye_virtual_battery.venus_bms_publisher:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "."]
+testpaths = ["tests"]

@@ -1,0 +1,17 @@
+deye-virtual-battery
+Copyright 2026 the deye-virtual-battery contributors
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+This product includes no third-party source code.  On a Venus OS device it
+imports velib_python (MIT, https://github.com/victronenergy/velib_python) from
+the Venus OS installation at runtime; that library is not redistributed here.
+
+Victron Energy, Venus OS, VE.Bus, VE.Can, Cerbo GX and Multi are trademarks of
+Victron Energy B.V.  Deye is a trademark of Ningbo Deye Inverter Technology
+Co., Ltd.  This project is not affiliated with, endorsed by, or supported by
+either company.

@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+
+# Optional private captures used by the opt-in extended tests.  Recordings
+# from a real installation carry pack serial numbers and site telemetry, so
+# they are never committed.
+tests/data/private/
+
+# Local scratch
+*.log
+!tests/data/*.log
+.env
+.env.*
+*:Zone.Identifier
