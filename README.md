@@ -46,7 +46,10 @@ are responsible for your own system.
   charge and discharge. The driver resolves it from frames on the wire rather
   than from configuration.
 - Publishes an honest identity (`ProductId 0xFFFF`), so no vendor-specific
-  Venus logic binds to it.
+  Venus logic binds to it, and the pack serial on the standard `/Serial` path.
+  The serial arrives split across `0x600` and `0x650`; the driver joins the two
+  halves and publishes nothing at all until both have decoded, because half a
+  serial looks like a whole one.
 - Maps Deye fault tables to real Venus alarms instead of suppressing them.
 - Optionally owns the `0x305`/`0x307` inverter keepalive, but only after an
   explicit, verified handover.
@@ -303,6 +306,15 @@ for the detected profile, the effective limits, and — importantly — whether
 the policy layer would ever have stopped discharge or switched the inverter
 off. Two redacted sample recordings are in `tests/data/` if you want to see
 the expected output.
+
+**The pack serial is masked in all offline output**, including nested models,
+because this is exactly the output people paste into bug reports. It is still
+published normally on the device's own D-Bus, where Venus and VRM want it. Pass
+`--show-serial` when you genuinely need it locally.
+
+Raw `candump` logs are a different matter: they carry the serial in `0x600` and
+`0x650` in the clear. Redact those two frames before sharing a capture — the
+bundled samples show the shape.
 
 ---
 

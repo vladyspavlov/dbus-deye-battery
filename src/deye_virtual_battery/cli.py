@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from typing import Any
 from pathlib import Path
 import sys
 import time
@@ -92,10 +93,56 @@ def print_human(snapshot: dict[str, object]) -> None:
     print("CAN TX: disabled; D-Bus publication: disabled")
 
 
+SERIAL_FIELDS = ("identity.serial_first_half", "identity.serial_second_half")
+REDACTED = "<redacted>"
+
+
+VALUE_KEYS = ("value", "cached_value", "effective_value", "last_rejected_value")
+
+
+def redact_serial(payload: Any, *, show: bool = False) -> Any:
+    """Blank the pack serial before a snapshot or model is printed.
+
+    The serial identifies one physical battery, and this tooling's output is
+    exactly what people paste into bug reports and forum posts.  The serial is
+    still published on the device's own D-Bus, where Venus and VRM legitimately
+    want it; this masks only the offline output.  Pass ``--show-serial`` when
+    you actually need it.
+
+    The walk is recursive because results nest a full D-Bus model inside
+    themselves, and a redaction that only checked the top level would quietly
+    miss those.  It edits in place and returns the same object.
+    """
+    if show:
+        return payload
+    if isinstance(payload, list):
+        for item in payload:
+            redact_serial(item)
+        return payload
+    if not isinstance(payload, dict):
+        return payload
+
+    if payload.get("/Serial") is not None:
+        payload["/Serial"] = REDACTED
+    for name in SERIAL_FIELDS:
+        state = payload.get(name)
+        if isinstance(state, dict):
+            # A cached field carries its value under several keys; missing one
+            # of them would defeat the whole exercise.
+            for key in VALUE_KEYS:
+                if state.get(key) is not None:
+                    state[key] = REDACTED
+    for value in payload.values():
+        if isinstance(value, (dict, list)):
+            redact_serial(value)
+    return payload
+
+
 def command_replay(arguments: argparse.Namespace) -> int:
     cache = replay(arguments.paths, arguments.capacity_ah)
     snapshot = cache.snapshot()
     if arguments.json:
+        redact_serial(snapshot, show=arguments.show_serial)
         print(json.dumps(snapshot, indent=2, sort_keys=True))
     else:
         print_human(snapshot)
@@ -106,6 +153,7 @@ def command_model(arguments: argparse.Namespace) -> int:
     cache = replay(arguments.paths, arguments.capacity_ah)
     snapshot = cache.snapshot()
     model = build_mock_dbus_model(snapshot, vebus_voltage_v=arguments.vebus_voltage)
+    redact_serial(model, show=arguments.show_serial)
     print(json.dumps(model, indent=2, sort_keys=True))
     return 1 if snapshot["statistics"]["decode_errors"] else 0
 
@@ -116,6 +164,7 @@ def command_simulate(arguments: argparse.Namespace) -> int:
         arguments.vebus,
         capacity_ah=arguments.capacity_ah,
     )
+    redact_serial(result, show=arguments.show_serial)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
@@ -126,6 +175,7 @@ def command_simulate_venus(arguments: argparse.Namespace) -> int:
         arguments.vebus,
         capacity_ah=arguments.capacity_ah,
     )
+    redact_serial(result, show=arguments.show_serial)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
@@ -145,7 +195,16 @@ def command_watch(arguments: argparse.Namespace) -> int:
             else:
                 now = time.monotonic()
                 if now - last_print >= arguments.interval:
-                    print(json.dumps(cache.snapshot(at=time.time()), sort_keys=True), flush=True)
+                    print(
+                        json.dumps(
+                            redact_serial(
+                                cache.snapshot(at=time.time()),
+                                show=arguments.show_serial,
+                            ),
+                            sort_keys=True,
+                        ),
+                        flush=True,
+                    )
                     last_print = now
                 time.sleep(0.1)
 
@@ -158,6 +217,11 @@ def build_parser() -> argparse.ArgumentParser:
     replay_parser.add_argument("paths", type=Path, nargs="+")
     replay_parser.add_argument("--capacity-ah", type=float, default=230.0)
     replay_parser.add_argument("--json", action="store_true")
+    replay_parser.add_argument(
+        "--show-serial",
+        action="store_true",
+        help="include the pack serial in output; redacted by default",
+    )
     replay_parser.set_defaults(function=command_replay)
 
     model_parser = subparsers.add_parser(
@@ -171,6 +235,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         help="optional local test observation; never reads or writes live D-Bus",
     )
+    model_parser.add_argument(
+        "--show-serial",
+        action="store_true",
+        help="include the pack serial in output; redacted by default",
+    )
     model_parser.set_defaults(function=command_model)
 
     simulate_parser = subparsers.add_parser(
@@ -180,6 +249,11 @@ def build_parser() -> argparse.ArgumentParser:
     simulate_parser.add_argument("--can", type=Path, nargs="+", required=True)
     simulate_parser.add_argument("--vebus", type=Path, nargs="+", required=True)
     simulate_parser.add_argument("--capacity-ah", type=float, default=230.0)
+    simulate_parser.add_argument(
+        "--show-serial",
+        action="store_true",
+        help="include the pack serial in output; redacted by default",
+    )
     simulate_parser.set_defaults(function=command_simulate)
 
     simulate_venus_parser = subparsers.add_parser(
@@ -189,6 +263,11 @@ def build_parser() -> argparse.ArgumentParser:
     simulate_venus_parser.add_argument("--can", type=Path, nargs="+", required=True)
     simulate_venus_parser.add_argument("--vebus", type=Path, nargs="+", required=True)
     simulate_venus_parser.add_argument("--capacity-ah", type=float, default=230.0)
+    simulate_venus_parser.add_argument(
+        "--show-serial",
+        action="store_true",
+        help="include the pack serial in output; redacted by default",
+    )
     simulate_venus_parser.set_defaults(function=command_simulate_venus)
 
     watch_parser = subparsers.add_parser("watch", help="follow a local capture without CAN or D-Bus access")
@@ -196,6 +275,11 @@ def build_parser() -> argparse.ArgumentParser:
     watch_parser.add_argument("--capture-root", type=Path, default=Path("captures/live"))
     watch_parser.add_argument("--capacity-ah", type=float, default=230.0)
     watch_parser.add_argument("--interval", type=float, default=5.0)
+    watch_parser.add_argument(
+        "--show-serial",
+        action="store_true",
+        help="include the pack serial in output; redacted by default",
+    )
     watch_parser.set_defaults(function=command_watch)
     return parser
 

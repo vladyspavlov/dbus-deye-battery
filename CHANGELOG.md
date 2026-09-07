@@ -25,6 +25,11 @@ First public release.
   profile and a live `Sol-ark` -> `victronCAN` -> `Sol-ark` switch. The
   profile-switch tests now run by default instead of being skipped.
 
+- The pack serial is now published on the standard Venus `/Serial` path. It
+  arrives split across `0x600` and `0x650`; both halves must decode as
+  printable ASCII before anything is published. Offline tooling masks it by
+  default, with `--show-serial` to opt back in.
+
 ### Changed
 - Corrected Deye V3.3 fault tables 2, 3, 4, 6 and 7, the `0x35C` request-heat
   bit, and the `0x35E` manufacturer/pack-number split, all against the

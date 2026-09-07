@@ -56,6 +56,7 @@ def build_mock_dbus_model(
         "/ProductName": "Deye SE-F12-C",
         "/CustomName": "Deye SE-F12-C (shadow)",
         "/Manufacturer": "Deye",
+        "/Serial": _serial(fields),
         "/DeviceInstance": config.device_instance,
         "/Connected": 1 if ready else 0,
         "/Dc/0/Voltage": voltage,
@@ -191,6 +192,26 @@ def build_mock_dbus_model(
 def _profile_value(snapshot: dict[str, Any], key: str) -> Any:
     profile = snapshot.get("protocol_profile")
     return profile.get(key) if isinstance(profile, dict) else None
+
+
+def _serial(fields: dict[str, Any]) -> str | None:
+    """Join the pack serial, which arrives split across two CAN frames.
+
+    ``0x600`` carries the first eight characters and ``0x650`` the second
+    eight; concatenated they are the serial the vendor app displays.  Both
+    halves must have decoded as printable ASCII before anything is published:
+    half a serial is worse than none, because it looks like a whole one.
+
+    Returned as ``None`` -- Venus's invalid value -- until both are present.
+    """
+    first = _effective(fields, "identity.serial_first_half")
+    second = _effective(fields, "identity.serial_second_half")
+    if not isinstance(first, str) or not isinstance(second, str):
+        return None
+    # Vendors pad short serials; NULs cannot appear here because the decoder
+    # only accepts printable ASCII, but trailing spaces do.
+    serial = (first + second).strip()
+    return serial or None
 
 
 def _effective(fields: dict[str, Any], name: str) -> Any:
