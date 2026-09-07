@@ -100,10 +100,31 @@ This driver decodes that condition rather than hiding it —
 `/Alarms/HighDischargeCurrent` level 2 — so if it ever does fire you can see it
 in Venus instead of inferring it from an outage.
 
-The firmware is visible on the wire in `0x500`. On the reference pack the
-decoded `identity.pack_software_version_raw` read **752** before the update and
-**1520** after, with `identity.boot_version` unchanged at `V1.0F`. Replay a
+The update on the reference pack, applied over the air from the battery app:
+
+| | |
+|---|---|
+| Previous | `LVESS1525814N01` |
+| Current | `LVESS1526701N01_F005` |
+
+**You can identify the running firmware from CAN alone**, without the app.
+`0x500` bytes 0-1 changed from `F0 02` to `F0 05` across the update, while
+`identity.boot_version` stayed `V1.0F`. Rendered as hex digits those bytes read
+`F002` and `F005` — and `F005` is exactly the suffix on the installed image
+name above.
+
+That correspondence is *probable, not confirmed*: it matches on the one pairing
+that can be checked, since the older image name carries no `F` suffix to
+compare against. Treat `0x500` bytes 0-1 as a firmware marker you can diff
+against your own earlier captures, not as a decoder for the vendor's version
+string. The driver exposes the raw value as
+`identity.pack_software_version_raw` (`752` and `1520` respectively); replay a
 capture through `tools/validate_real_captures.py` to read yours.
+
+The change is sharply visible in a recording: on this system the app reported
+the OTA in progress at 18:07 UTC and the new version word appeared on the CAN
+bus at 18:13:15 UTC, with a roughly 15-second gap in battery frames where the
+BMS restarted.
 
 ### The newer firmware adds CAN protocol selection
 
