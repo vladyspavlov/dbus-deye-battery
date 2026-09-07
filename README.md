@@ -50,40 +50,70 @@ are responsible for your own system.
 
 ---
 
-## ☠️ DANGER — wire ONLY two pins
+## ☠️ DANGER — wire ONLY two pins, and NOT straight through
 
-**Connect exactly two conductors. Nothing else.**
+**Two conductors. Deye pin 4 → Victron pin 7, Deye pin 5 → Victron pin 8.**
+The pin numbers differ on each side, so a straight-through cable is wrong.
+
+### RJ45 pin numbering
+
+Hold the plug with the **gold contacts facing you** and the **locking clip
+pointing down**. Pin 1 is then on the left:
 
 ```
-        DEYE  "PCS" port                 VICTRON  BMS-Can / VE.Can
-
-     pin 4  CANH  ●──────────────────►  ●  pin 7  CAN-H
-     pin 5  CANL  ●──────────────────►  ●  pin 8  CAN-L
-
-     every other pin on both sides:  LEAVE COMPLETELY UNCONNECTED
+              ┌─┬─┬─┬─┬─┬─┬─┬─┐
+              │1│2│3│4│5│6│7│8│      gold contacts toward you
+              └─┴─┴─┴─┴─┴─┴─┴─┘
+                     ╨              clip underneath, pointing down
 ```
 
-| Deye PCS | | Victron |
-|---|---|---|
-| **pin 4** CANH | → | **pin 7** CAN-H |
-| **pin 5** CANL | → | **pin 8** CAN-L |
+### The only two connections that may exist
 
-**Anything else connected will destroy the battery BMS.** The Victron side is
-not a passive data port: pins other than 7 and 8 carry supply and return
-voltages, and putting those onto the Deye PCS connector — whose remaining pins
-are RS485 and internal signals — damages the BMS. This is not a
-"might be a problem" caution; treat any extra conductor as a dead BMS.
+```
+      DEYE  "PCS" port                     VICTRON  BMS-Can / VE.Can
+      ┌───────────────────┐                ┌───────────────────┐
+      │ pin 1   ○         │                │         ○   pin 1 │
+      │ pin 2   ○         │                │         ○   pin 2 │
+      │ pin 3   ○         │                │         ○   pin 3 │
+      │ pin 4   ●  CANH ──┼─────────┐      │         ○   pin 4 │
+      │ pin 5   ●  CANL ──┼──────┐  │      │         ○   pin 5 │
+      │ pin 6   ○         │      │  │      │         ○   pin 6 │
+      │ pin 7   ○         │      │  └──────┼──● CAN-H  pin 7   │
+      │ pin 8   ○         │      └─────────┼──● CAN-L  pin 8   │
+      └───────────────────┘                └───────────────────┘
 
-Victron's own guidance says the same thing:
+        ● wired          ○ MUST be left completely unconnected
+
+              Deye 4  ──────────────►  Victron 7      (CANH)
+              Deye 5  ──────────────►  Victron 8      (CANL)
+
+        The two wires run parallel — they do NOT cross each other.
+        But pin 4 does NOT go to pin 4:  this is not a patch cable.
+```
+
+### Why a straight-through cable destroys the BMS
+
+An ordinary Ethernet patch cable joins all eight conductors, pin 1 to pin 1
+and so on. That does two damaging things at once:
+
+- Victron's CAN-H and CAN-L (pins 7 and 8) land on **Deye pins 7 and 8, which
+  are RS485** — CAN levels driven straight into the battery's RS485
+  transceiver.
+- The Victron side is not a passive data port. Pins other than 7 and 8 carry
+  **supply and return voltages**, and a patch cable delivers those onto the
+  Deye connector too.
+
+Treat any extra conductor as a dead BMS. Not "may cause problems" — assume the
+battery's BMS will be destroyed.
+
+Victron's own guidance says exactly this:
 
 > *"Only use CAN-H and CAN-L. No other wires."*
 
-Do **not** use an ordinary straight-through Ethernet patch cable. It connects
-all eight conductors, which is exactly the failure above. Either buy the
-correct cable or crimp one with two wires and verify it with a meter before
-plugging anything in.
+**Buy the correct cable, or crimp one with two wires and ring it out with a
+meter before it goes anywhere near the battery.**
 
-Also:
+### Also
 
 - Use the battery's **`PCS`** port. The `IN` and `OUT` ports are for
   battery-to-battery parallel links and have a different pinout again.
