@@ -30,7 +30,16 @@ First public release.
   printable ASCII before anything is published. Offline tooling masks it by
   default, with `--show-serial` to opt back in.
 
+- `docs/protocol-notes.md`, and reference vectors in
+  `tests/test_vendor_app_reference.py` taken from a CAN capture that overlaps a
+  timestamped record in the vendor app, so decoder output is pinned against the
+  manufacturer's own labels rather than only against our reading of a document.
+
 ### Changed
+
+- Resolved the `0x550` unit, previously left open: the accumulated counters are
+  0.001 kWh. The vendor document states it, and the app's amp-hour view agrees
+  exactly at the pack's 51.2 V nominal (6.190 kWh = 120.90 Ah).
 - Corrected Deye V3.3 fault tables 2, 3, 4, 6 and 7, the `0x35C` request-heat
   bit, and the `0x35E` manufacturer/pack-number split, all against the
   original-layout protocol tables.

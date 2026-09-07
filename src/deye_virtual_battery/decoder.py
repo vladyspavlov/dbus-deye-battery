@@ -688,6 +688,11 @@ class DeyeDecoder:
             _field(frame, "mos.discharge_closed", bool(flags & 0x20), None, CRITICAL),
             _field(frame, "mos.precharge_closed", bool(flags & 0x40), None, CRITICAL),
             _field(frame, "mos.heater_closed", bool(flags & 0x80), None, CRITICAL),
+            # Bits 1-3 are unassigned by the protocol document.  The vendor app
+            # shows a fifth "Current Limit MOS" alongside the four decoded
+            # above, so one of these is probably it -- but it has read Open in
+            # every sample captured so far, so the bit cannot be identified.
+            # Kept as an opaque diagnostic rather than guessed at.
             _field(frame, "mos.reserved_flags", flags & 0x0E, None, CRITICAL),
         ]
         fields.extend(
@@ -793,6 +798,10 @@ class DeyeDecoder:
         ]
 
     def _decode_550(self, frame: CanFrame) -> list[DecodedField]:
+        # Unit confirmed twice over: the vendor protocol states 0.001 kWh, and
+        # the vendor app reports the same counter in amp-hours.  At a sample
+        # where CAN read 6190, the app showed "Total Charge AH 120.90Ah" --
+        # 6.190 kWh / 51.2 V nominal is 120.90 Ah, matching every digit.
         return [
             _field(frame, "history.charged_energy", _scaled(_u32(frame.payload, 0), 1000, 3), "kWh", OPTIONAL),
             _field(frame, "history.discharged_energy", _scaled(_u32(frame.payload, 4), 1000, 3), "kWh", OPTIONAL),

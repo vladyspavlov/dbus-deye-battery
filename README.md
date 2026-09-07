@@ -350,10 +350,16 @@ No runtime dependencies. Tests run on any Linux/macOS machine — none of them
 need a GX, a CAN interface, or D-Bus. Three extended tests are skipped unless
 you drop your own recordings into `tests/data/private/`.
 
+[`docs/protocol-notes.md`](docs/protocol-notes.md) records what has been
+confirmed against the vendor's own app and protocol document, what is only
+probable, and what is still unknown.
+
 Contributions welcome, especially:
 
 - captures from other Deye models or firmware,
-- `0x400` sub-state enumeration, which is still unnamed,
+- the `0x400` system-status enumeration, which is still unnamed,
+- the `0x110` bit for the app's fifth "Current Limit MOS" — it needs a capture
+  taken while the pack is actively current-limiting,
 - confirmation of the `0x35E` cell-manufacturer code `0x1C`.
 
 ## Related projects
