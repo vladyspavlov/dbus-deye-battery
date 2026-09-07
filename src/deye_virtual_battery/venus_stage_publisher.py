@@ -36,7 +36,7 @@ from .venus_runtime import (
 )
 
 
-SERVICE_NAME = "com.victronenergy.battery.deye_se_f12"
+SERVICE_NAME = "com.victronenergy.battery.deye_lv"
 DEVICE_INSTANCE = 513
 NO_BMS_CONTROL = -255
 UPDATE_INTERVAL_MS = 250
@@ -142,11 +142,11 @@ def _add_paths(
         "/Mgmt/Connection": "passive SocketCAN can0 (no-control stage)",
         "/DeviceInstance": DEVICE_INSTANCE,
         "/ProductId": 0xFFFF,
-        "/ProductName": "Deye SE-F12-C",
-        "/CustomName": "Deye SE-F12-C (staged; do not select)",
+        "/ProductName": "Deye LV battery",
+        "/CustomName": "Deye LV battery (staged; do not select)",
         "/Manufacturer": "Deye",
         "/FirmwareVersion": "shadow-stage",
-        "/HardwareVersion": "SE-F12-C",
+        "/HardwareVersion": "Deye SE-F series",
         "/Diagnostics/Stage/NoCanTransmit": 1,
         "/Diagnostics/Stage/NoDbusWrites": 1,
         "/Diagnostics/Stage/RequiresNoBmsControl": 1,

@@ -217,7 +217,7 @@ class VirtualBatteryCache:
             source_can_id=None,
             last_valid_timestamp=None,
             confidence="configured",
-            note="SE-F12-C model configuration; not inferred from a missing frame",
+            note="pack model configuration; not inferred from a missing frame",
         )
 
     def apply(self, frame: CanFrame) -> list[DecodedField]:

@@ -54,8 +54,8 @@ def build_mock_dbus_model(
         "/Mgmt/ProcessVersion": f"{VERSION}-shadow",
         "/Mgmt/Connection": "recorded Deye PCS CAN (PC-only mock)",
         "/ProductId": config.product_id,
-        "/ProductName": "Deye SE-F12-C",
-        "/CustomName": "Deye SE-F12-C (shadow)",
+        "/ProductName": "Deye LV battery",
+        "/CustomName": "Deye LV battery (shadow)",
         "/Manufacturer": "Deye",
         "/Serial": serial_number(fields),
         "/DeviceInstance": config.device_instance,
@@ -182,7 +182,7 @@ def build_mock_dbus_model(
     paths.update(policy["custom_alarms"])
     return {
         "mode": "pc-only-mock-dbus",
-        "service_name": "com.victronenergy.battery.deye_se_f12",
+        "service_name": "com.victronenergy.battery.deye_lv",
         "registered_on_dbus": False,
         "action_taken": False,
         "paths": paths,

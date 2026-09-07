@@ -40,7 +40,7 @@ def test_preserved_capture_builds_safe_pc_only_mock_battery_contract():
     model = build_mock_dbus_model(snapshot)
     paths = model["paths"]
     assert model["registered_on_dbus"] is False
-    assert paths["/ProductName"] == "Deye SE-F12-C"
+    assert paths["/ProductName"] == "Deye LV battery"
     assert paths["/Dc/0/Voltage"] == 53.5
     assert paths["/Info/MaxChargeVoltage"] == 55.2
     assert paths["/Info/MaxChargeCurrent"] == 0.0

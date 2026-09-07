@@ -226,9 +226,9 @@ def test_stale_critical_data_prevents_mock_service_publication():
 
 def test_mock_dbus_identity_is_deye_and_never_lg_or_pylon():
     model = build_mock_dbus_model(baseline_cache().snapshot(at=1000.2))
-    assert model["service_name"] == "com.victronenergy.battery.deye_se_f12"
+    assert model["service_name"] == "com.victronenergy.battery.deye_lv"
     assert model["paths"]["/Manufacturer"] == "Deye"
-    assert model["paths"]["/ProductName"] == "Deye SE-F12-C"
+    assert model["paths"]["/ProductName"] == "Deye LV battery"
     assert model["paths"]["/ProductId"] not in {0xB004, 0xB009}
     assert model["paths"]["/Diagnostics/Policy/WritesVebusMode"] == 0
 

@@ -171,7 +171,7 @@ def test_a_second_pack_can_be_published_without_colliding():
     _validate(
         args(
             "--interface", "can1",
-            "--service-name", "com.victronenergy.battery.deye_se_f12_b",
+            "--service-name", "com.victronenergy.battery.deye_lv_b",
             "--device-instance", "514",
         )
     )

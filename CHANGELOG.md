@@ -3,6 +3,39 @@
 Versions are strictly numeric: Venus OS and VRM display `/Mgmt/ProcessVersion`
 verbatim, so no suffixes or build tags appear here.
 
+## 0.7.5
+
+### Changed
+- **The project is now named `dbus-deye-battery` throughout**, matching the
+  repository and Victron's naming convention for Venus OS D-Bus drivers. The
+  distribution name, the README title and the package description all agree.
+- **The default D-Bus service name is now model-neutral**:
+  `com.victronenergy.battery.deye_lv`, was `...deye_se_f12`. The driver is not
+  tied to an SE-F12. Upgrading cannot change a running system's identity: the
+  installer pins the previous name into the config of any existing install that
+  never set one, because a changed service name deselects it as battery monitor
+  and BMS.
+- The default GX device name and the offline shadow's `/ProductName` are now
+  `Deye LV battery` rather than a fixed model. Set `MODEL=` for your variant.
+- The package description everywhere is "Victron Venus OS battery driver for
+  Deye SE-F LV packs over BMS-Can".
+
+### Added
+- **A Ukrainian translation of the README** ([`README.uk.md`](README.uk.md)),
+  cross-linked with the English original, which remains authoritative.
+- README badges, a table of contents, an FAQ, and `[project.urls]` metadata.
+- `tests/test_repository_metadata.py`: the distribution name matches the
+  repository, one description is used everywhere, both READMEs pin the current
+  version and link to each other, every relative link and every table-of-
+  contents anchor resolves, and no model-specific service name survives outside
+  the installer's deliberate upgrade guard.
+
+### Note on the runtime names
+The on-device install root, service and log directory remain
+`deye-virtual-battery`, and the Python package remains `deye_virtual_battery`.
+Renaming them would orphan the rollback backups of existing installs and break
+in-place upgrades, for no user-visible benefit.
+
 ## 0.7.4
 
 ### Changed

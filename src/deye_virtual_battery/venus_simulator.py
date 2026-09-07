@@ -41,7 +41,7 @@ def simulate_systemcalc(
     """
 
     paths = stateful_model["paths"]
-    service_name = "com.victronenergy.battery.deye_se_f12"
+    service_name = "com.victronenergy.battery.deye_lv"
     would_exist = bool(stateful_model["would_register_mock_service"])
     connected = bool(paths.get("/Connected"))
     virtual_selected = scenario.controlling_bms == "virtual"

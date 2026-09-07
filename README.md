@@ -1,10 +1,42 @@
-# deye-virtual-battery
+# dbus-deye-battery
 
-A Venus OS battery driver for **Deye SE-F12** low-voltage packs on BMS-Can.
+**Victron Venus OS battery driver for Deye SE-F LV packs over BMS-Can.**
+
+Decodes the Deye PCS CAN protocol directly and publishes a native
+`com.victronenergy.battery.*` D-Bus service, so a Deye low-voltage pack appears
+in Venus OS as itself — with correct limits, correct alarms and a correct
+current sign — instead of being misidentified as an LG RESU.
+
+[![tests](https://github.com/vladyspavlov/dbus-deye-battery/actions/workflows/ci.yml/badge.svg)](https://github.com/vladyspavlov/dbus-deye-battery/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/vladyspavlov/dbus-deye-battery?sort=semver)](https://github.com/vladyspavlov/dbus-deye-battery/releases)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![python](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
+
+📖 **English** · [Українська](README.uk.md)
+
+---
+
+## Contents
+
+- [The problem this solves](#the-problem-this-solves)
+- [Read this before installing](#-read-this-before-installing)
+- [DANGER — wire ONLY two pins](#-danger--wire-only-two-pins-and-not-straight-through)
+- [What it does](#what-it-does)
+- [Compatibility and tested scope](#compatibility-and-tested-scope)
+- [Field notes from the reference installation](#field-notes-from-the-reference-installation)
+- [Installation](#installation)
+- [Validate against your own recording first](#validate-against-your-own-recording-first)
+- [FAQ](#faq)
+- [How it is put together](#how-it-is-put-together)
+- [Development](#development)
+- [Related projects](#related-projects)
+- [License](#license)
+
+---
 
 ## The problem this solves
 
-**Out of the box, Venus OS identifies a Deye SE-F12 as an LG RESU.**
+**Out of the box, Venus OS identifies a Deye SE-F pack as an LG RESU.**
 
 Venus ships a closed CAN battery driver that works out the manufacturer from
 the frames on the wire. Current Deye firmware no longer sends the vendor marker
@@ -38,11 +70,12 @@ or drop AC output to your loads.
 
 - It is **not** a Victron product and is not supported by Victron or Deye.
 - It has been developed and run against **one** installation. See
-  [Tested scope](#tested-scope) for exactly what that means.
-- `PolicyConfig.blocked_charge_cvl_v` (55.2 V) is a **commissioning value that
-  has not been validated on a bench or by either vendor.** It is the voltage
-  published while the battery blocks charge. Review it against your own pack
-  before selecting this driver as your BMS.
+  [Compatibility and tested scope](#compatibility-and-tested-scope) for exactly
+  what that means.
+- `PolicyConfig.blocked_charge_cvl_v` (55.2 V on a 16-series pack) is a
+  **commissioning value that has not been validated on a bench or by either
+  vendor.** It is the voltage published while the battery blocks charge. Review
+  it against your own pack before selecting this driver as your BMS.
 - Installing changes nothing on its own. Selecting it as your BMS does.
 
 Provided under the Apache License 2.0, **without warranty of any kind**. You
@@ -123,6 +156,8 @@ meter before it goes anywhere near the battery.**
   the **sign of the current in `0x356`**. Getting that sign wrong inverts
   charge and discharge. The driver resolves it from frames on the wire rather
   than from configuration.
+- **Detects the pack rather than assuming a model.** Capacity, series cell
+  count and every derived pack voltage threshold are measured from the battery.
 - Publishes an honest identity (`ProductId 0xFFFF`), so no vendor-specific
   Venus logic binds to it, and the pack serial on the standard `/Serial` path.
   The serial arrives split across `0x600` and `0x650`; the driver joins the two
@@ -148,34 +183,39 @@ meter before it goes anywhere near the battery.**
 
 ---
 
-## Tested scope
+## Compatibility and tested scope
 
-**Nothing in the driver is tied to one model.** Capacity, series cell count,
-protocol profile and current sign are all read from the battery, and every pack
-voltage threshold scales from the measured series count. The only model-specific
-value is the name shown in the GX device list, which no Deye pack transmits —
-set it with `MODEL=` if you want your exact variant displayed.
+**Nothing in the driver is tied to one battery model.** Capacity, series cell
+count, protocol profile and current sign are all read from the battery, and
+every pack voltage threshold scales from the measured series count. The only
+model-specific value is the name shown in the GX device list, which no Deye
+pack transmits — set it with `MODEL=` if you want your exact variant displayed.
 
-Developed and running against:
+| Model | Status |
+|---|---|
+| **Deye SE-F12-C** | Verified — developed and running against one installation |
+| **Deye SE-F5-C** | Expected to work, unconfirmed on hardware |
+| **Deye SE-F16-C** | Expected to work, unconfirmed on hardware |
+| Other Deye LV packs on the PCS CAN protocol | Plausible, unconfirmed |
+
+The SE-F series shares one PCS interface, so the other variants should speak
+the same protocol — differing only in capacity and possibly series count, both
+of which the driver measures rather than assumes.
+
+Nobody has confirmed any of that on hardware. If you run it on anything other
+than an SE-F12-C, please [open an issue](https://github.com/vladyspavlov/dbus-deye-battery/issues)
+with a `candump` log — that is the single most useful thing you can contribute,
+and it is what turns "expected to work" into "tested".
+
+The reference installation:
 
 | | |
 |---|---|
 | Battery | Deye SE-F12-C, 230 Ah, 16-series |
 | Protocols | `Sol-ark` (Deye native) and `victronCAN`, both verified on the wire |
-| Inverter | MultiPlus-II GX 6k5 |
+| Inverter | Victron MultiPlus-II GX 6k5 |
 | Venus OS | v3.75, armv7l, Python 3.12 |
 | Bus | BMS-Can, 500 kbit/s, classical 11-bit frames |
-
-**Not tested, but expected to work:** the **SE-F5-C** and **SE-F16-C** share
-the SE-F series PCS interface, so they should speak the same protocol —
-differing only in capacity and possibly series count, both of which the driver
-measures rather than assumes. Other Deye LV packs are plausible for the same
-reason.
-
-Nobody has confirmed any of that on hardware. If you run it on anything other
-than an SE-F12-C, please open an issue with a `candump` log — that is the
-single most useful thing you can contribute, and it is what turns "expected to
-work" into "tested".
 
 What the driver measures for itself:
 
@@ -190,10 +230,9 @@ What the driver measures for itself:
 | Firmware marker | `0x500` / `0x363` / `0x35F` |
 
 If the series count cannot be measured — cell voltages missing, or the numbers
-disagree — the driver falls back to 16 and publishes
-`/HardwareVersion` as `… (assumed)` rather than pretending it measured
-something. Override with `CELL_COUNT=` if your pack is different and its cell
-data is unavailable.
+disagree — the driver falls back to 16 and publishes `/HardwareVersion` as
+`… (assumed)` rather than pretending it measured something. Override with
+`CELL_COUNT=` if your pack is different and its cell data is unavailable.
 
 ---
 
@@ -206,8 +245,8 @@ short-circuit-discharge protection (AFE-SCD)** with no real fault present. The
 BMS opened its discharge path, the battery dropped off the bus, and the Victron
 shut down as a consequence. Updating the BMS firmware stopped it.
 
-If you are chasing unexplained dropouts on an SE-F12, do the firmware update
-before suspecting your cabling, your GX, or a driver.
+If you are chasing unexplained dropouts on a Deye SE-F pack, do the firmware
+update before suspecting your cabling, your GX, or a driver.
 
 This driver decodes that condition rather than hiding it —
 `afe_short_circuit_discharge` and its latched variant both publish as
@@ -331,7 +370,7 @@ files, so the version the driver reports on D-Bus and in VRM always maps back
 to exact code — which is what you need when something misbehaves at 2am.
 
 ```sh
-VERSION=0.7.4          # see the Releases page for the current one
+VERSION=0.7.5          # see the Releases page for the current one
 
 cd /data
 wget -O deye.tar.gz https://github.com/vladyspavlov/dbus-deye-battery/archive/refs/tags/v$VERSION.tar.gz
@@ -357,30 +396,33 @@ publishing a battery service that nothing is consuming.
 ```sh
 tail -F /data/log/deye-virtual-battery/current
 
-dbus -y com.victronenergy.battery.deye_se_f12 /Connected              GetValue
-dbus -y com.victronenergy.battery.deye_se_f12 /Dc/0/Voltage           GetValue
-dbus -y com.victronenergy.battery.deye_se_f12 /Soc                    GetValue
-dbus -y com.victronenergy.battery.deye_se_f12 /Info/MaxChargeVoltage  GetValue
-dbus -y com.victronenergy.battery.deye_se_f12 /Diagnostics/Lifecycle/State GetValue
+dbus -y com.victronenergy.battery.deye_lv /Connected              GetValue
+dbus -y com.victronenergy.battery.deye_lv /Dc/0/Voltage           GetValue
+dbus -y com.victronenergy.battery.deye_lv /Soc                    GetValue
+dbus -y com.victronenergy.battery.deye_lv /Info/MaxChargeVoltage  GetValue
+dbus -y com.victronenergy.battery.deye_lv /Diagnostics/Lifecycle/State GetValue
 ```
 
 `/Connected` should be `1` and lifecycle state `'online'`. It should also
-appear in the GX menu under **Settings → Device list** as `Deye SE-F12-C`.
+appear in the GX menu under **Settings → Device list**, named `Deye LV battery`
+unless you set `MODEL=`.
 
 Confirm the current sign matches reality before going further: discharging
 must show **negative** `/Dc/0/Current`. Check the detected profile with
 
 ```sh
-dbus -y com.victronenergy.battery.deye_se_f12 /Diagnostics/Profile/BmsProtocol GetValue
+dbus -y com.victronenergy.battery.deye_lv /Diagnostics/Profile/BmsProtocol GetValue
 ```
 
 ### 3. Configure (optional)
 
-Edit `/data/deye-virtual-battery/config` — see `install/config.example` for
-every option. The common one is a different CAN interface:
+Edit `/data/deye-virtual-battery/config` — see
+[`install/config.example`](install/config.example) for every option. The two
+most common:
 
 ```sh
-CAN_INTERFACE=can1
+CAN_INTERFACE=can1       # Cerbo GX often has BMS-Can on can1
+MODEL=SE-F12-C           # your exact variant, shown in the GX device list
 ```
 
 Then restart: `svc -t /service/deye-virtual-battery`
@@ -389,11 +431,11 @@ Then restart: `svc -t /service/deye-virtual-battery`
 
 This is the step that changes system behaviour.
 
-**Settings → System setup → Battery monitor →** `Deye SE-F12-C`
+**Settings → System setup → Battery monitor →** the Deye entry
 
 To let it supply charge limits to DVCC as well:
 
-**Settings → System setup → Charge control → Controlling BMS →** `Deye SE-F12-C`
+**Settings → System setup → Charge control → Controlling BMS →** the Deye entry
 
 Watch VE.Bus Battery Operational Limits update to the driver's values, and
 watch your inverter for a few minutes before leaving it unattended.
@@ -425,14 +467,23 @@ Reverse it at any time:
 ### Uninstalling
 
 Restore your previous battery monitor and set **No BMS control** in the GX
-menu **first**, then:
+menu **first**, then run `install/uninstall.sh` from the unpacked source tree:
 
 ```sh
-sh /data/deye-virtual-battery/../deye-virtual-battery-main/install/uninstall.sh
+sh /data/dbus-deye-battery-$VERSION/install/uninstall.sh
 ```
 
 Source and backups are left in `/data/deye-virtual-battery` so you can roll
 back.
+
+### A note on the two names
+
+The GitHub project is `dbus-deye-battery`, following the Victron convention for
+Venus OS D-Bus drivers. On the device, the install root, the service and the
+log directory are `deye-virtual-battery`, and the Python package is
+`deye_virtual_battery`. Those runtime names are deliberately **not** renamed:
+existing installations run under them, and renaming would orphan their rollback
+backups and break in-place upgrades.
 
 ---
 
@@ -467,6 +518,44 @@ published normally on the device's own D-Bus, where Venus and VRM want it. Pass
 Raw `candump` logs are a different matter: they carry the serial in `0x600` and
 `0x650` in the clear. Redact those two frames before sharing a capture — the
 bundled samples show the shape.
+
+---
+
+## FAQ
+
+**Why does Venus OS show my Deye battery as an LG RESU?**
+Because the stock Venus CAN driver infers the manufacturer from the frames, and
+current Deye firmware no longer sends the marker it looks for. It falls through
+to LG's product ID. See [The problem this solves](#the-problem-this-solves).
+
+**Can Venus OS really switch my inverter off because of this?**
+Yes. Venus binds LG circuit-breaker detection to any battery service with LG's
+product ID, and that logic can write a VE.Bus mode that drops AC output. It is
+synthesised by Venus, not reported by the Deye.
+
+**My battery's charge and discharge are the wrong way round. Why?**
+The current sign in `0x356` depends on the battery's selected inverter
+protocol. `Sol-ark` and `victronCAN` disagree. This driver detects which one is
+active and applies the right sign.
+
+**Do I have to remove the stock `can-bus-bms` driver?**
+Not to try it — installing changes nothing until you select it. You do need to
+hand over CAN ownership if the stock driver keeps publishing a misidentified
+service, because Venus's vendor-specific logic binds to *any* matching service,
+not just the selected one. See [step 5](#5-can-keepalive-ownership-only-if-you-need-it).
+
+**Will it work on an SE-F5-C or SE-F16-C?**
+Probably — nothing in the driver is model-specific — but nobody has confirmed
+it on hardware. See [Compatibility](#compatibility-and-tested-scope).
+
+**Does it survive a Venus OS firmware update?**
+The source lives in `/data` and is restored by a `/data/rc.local` hook, which
+is Victron's own documented pattern for this.
+
+**Does it write anything to my system?**
+No Venus setting, no VE.Bus mode, no DVCC parameter — ever. The only thing it
+transmits is the `0x305`/`0x307` keepalive, and only after you explicitly hand
+ownership over.
 
 ---
 
@@ -505,6 +594,7 @@ you drop your own recordings into `tests/data/private/`.
 [`docs/protocol-notes.md`](docs/protocol-notes.md) records what has been
 confirmed against the vendor's own app and protocol document, what is only
 probable, and what is still unknown.
+[`CHANGELOG.md`](CHANGELOG.md) records what changed in each release.
 
 Contributions welcome, especially:
 

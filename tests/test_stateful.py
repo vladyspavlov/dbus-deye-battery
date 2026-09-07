@@ -197,7 +197,7 @@ def test_mock_systemcalc_separates_current_no_bms_and_selected_bms_loss():
     )
     assert current["active_bms_service"] is None
     assert current["control_bms_parameters"] == 0
-    assert selected["active_bms_service"] == "com.victronenergy.battery.deye_se_f12"
+    assert selected["active_bms_service"] == "com.victronenergy.battery.deye_lv"
     assert selected["control_bms_parameters"] == 1
     assert selected["dvcc_inputs"]["max_discharge_current_a"] == 230.0
 

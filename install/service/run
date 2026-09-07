@@ -5,7 +5,7 @@ exec 2>&1
 root=/data/deye-virtual-battery
 
 CAN_INTERFACE=can0
-SERVICE_NAME=com.victronenergy.battery.deye_se_f12
+SERVICE_NAME=com.victronenergy.battery.deye_lv
 DEVICE_INSTANCE=513
 MODEL=
 CELL_COUNT=

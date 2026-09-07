@@ -44,7 +44,19 @@ done
 cp "$source_dir/install/service/log/run" "$root/service/log/run"
 chmod 755 "$root/service/log/run"
 
-[ -f "$root/config" ] || cp "$source_dir/install/config.example" "$root/config"
+if [ -f "$root/config" ]; then
+    # 0.7.5 changed the default D-Bus service name from the model-specific
+    # ...deye_se_f12 to the model-neutral ...deye_lv.  An install that never
+    # pinned a name would silently move to the new one on upgrade, which
+    # deselects it as battery monitor and BMS.  Pin the old name instead: an
+    # upgrade must never change a running system's identity.
+    if ! grep -q '^[[:space:]]*SERVICE_NAME=' "$root/config"; then
+        echo "pinning the pre-0.7.5 D-Bus service name in $root/config"
+        echo "SERVICE_NAME=com.victronenergy.battery.deye_se_f12" >> "$root/config"
+    fi
+else
+    cp "$source_dir/install/config.example" "$root/config"
+fi
 
 # Persist across reboots and firmware updates.
 if [ ! -f /data/rc.local ]; then
@@ -66,7 +78,7 @@ echo
 echo "installed. version: $(sed -n 's/^VERSION = "\(.*\)"/\1/p' "$root/src/deye_virtual_battery/version.py")"
 echo "config:    $root/config"
 echo "logs:      tail -F /data/log/deye-virtual-battery/current"
-echo "check:     dbus -y com.victronenergy.battery.deye_se_f12 /Connected GetValue"
+echo "check:     dbus -y com.victronenergy.battery.deye_lv /Connected GetValue"
 echo
 echo "The adapter is running but NOT selected. It changes nothing until you"
 echo "select it as the battery monitor / BMS in the GX menu."

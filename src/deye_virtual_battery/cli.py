@@ -61,7 +61,7 @@ def print_human(snapshot: dict[str, object]) -> None:
         freshness = entry.get("freshness")
         return f"{measured} {unit} ({freshness})".strip()
 
-    print("Deye SE-F12-C PC-only shadow state")
+    print("Deye LV battery PC-only shadow state")
     print(f"frames: {statistics.get('total_frames')}, decode errors: {statistics.get('decode_errors')}")
     print(
         f"BMS protocol profile: {health.get('bms_protocol_profile')}"

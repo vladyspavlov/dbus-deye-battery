@@ -40,7 +40,7 @@ from .venus_runtime import (
 from .version import PROCESS_VERSION
 
 
-SERVICE_NAME = "com.victronenergy.battery.deye_se_f12"
+SERVICE_NAME = "com.victronenergy.battery.deye_lv"
 DEVICE_INSTANCE = 513
 PRODUCT_ID = 0xFFFF
 NO_BMS_CONTROL = -255
@@ -484,7 +484,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model",
         default=None,
-        help="model designation shown in the GX device list, e.g. SE-F12-C. "
+        help="model designation shown in the GX device list, e.g. SE-F12-C, "
+        "SE-F5-C or SE-F16-C. "
         "Not transmitted on CAN, so it cannot be detected.",
     )
     parser.add_argument(

@@ -3,14 +3,18 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "deye-virtual-battery"
-version = "0.7.4"
-description = "Deye SE-F12-C battery adapter for Victron Venus OS (BMS-Can)"
+name = "dbus-deye-battery"
+version = "0.7.5"
+description = "Victron Venus OS battery driver for Deye SE-F LV packs over BMS-Can"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
-keywords = ["victron", "venus-os", "deye", "can", "bms", "battery", "solar"]
+keywords = [
+    "victron", "venus-os", "gx", "cerbo-gx", "multiplus", "dvcc",
+    "deye", "se-f12", "se-f5", "se-f16", "lifepo4", "lfp",
+    "bms", "bms-can", "can-bus", "socketcan", "dbus", "battery", "solar",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -22,6 +26,12 @@ classifiers = [
 # dbus, gi and vedbus from the Venus OS installation itself; off-device the
 # decoder, policy and replay layers run on the standard library alone.
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/vladyspavlov/dbus-deye-battery"
+Repository = "https://github.com/vladyspavlov/dbus-deye-battery"
+Issues = "https://github.com/vladyspavlov/dbus-deye-battery/issues"
+Changelog = "https://github.com/vladyspavlov/dbus-deye-battery/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]

@@ -7,7 +7,7 @@
 CAN_INTERFACE=can0
 
 # D-Bus identity.  Change both only if you run more than one pack.
-SERVICE_NAME=com.victronenergy.battery.deye_se_f12
+SERVICE_NAME=com.victronenergy.battery.deye_lv
 DEVICE_INSTANCE=513
 
 # Model designation shown in the GX device list, e.g. SE-F12-C, SE-F5-C,

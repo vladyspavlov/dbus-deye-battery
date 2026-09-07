@@ -3,7 +3,7 @@ set -eu
 
 root=/data/deye-virtual-battery
 
-SERVICE_NAME=com.victronenergy.battery.deye_se_f12
+SERVICE_NAME=com.victronenergy.battery.deye_lv
 CAN_INTERFACE=can0
 
 # shellcheck source=/dev/null
