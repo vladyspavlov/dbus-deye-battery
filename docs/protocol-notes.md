@@ -71,16 +71,56 @@ publishes Venus's invalid value rather than inventing one — notably
 - the full software and hardware version strings (`LVESS...`); CAN carries
   only the short marker described below
 
-## Firmware marker in `0x500` and `0x363`
+## Firmware marker in `0x500`, `0x363` and `0x35F`
 
-**Probable.** `0x500` bytes 0-1 changed `F0 02` → `F0 05` across a firmware
-update, and `0x363` bytes 0-1 carry the same word. Rendered as hex digits
-these read `F002` and `F005`, and `F005` is the suffix on the installed image
-name `LVESS1526701N01_F005`.
+**Confirmed.** The two-byte version word rendered as hex digits is the vendor's
+own `F` designation. `F0 05` reads `F005`, and the image installed on the
+reference pack is `LVESS1526701N01_F005`. Before the update the wire read
+`F0 02`.
 
-Only one pairing can be checked, because the older image name carries no `F`
-suffix. Treat it as a marker to diff against your own earlier captures, not as
-a decoder for the vendor's version string.
+Published as `identity.pack_firmware_marker` (and
+`victron_identity.firmware_marker` from `0x35F`), because `F005` is what the
+vendor's tooling shows, whereas the raw little-endian integer for the same
+bytes is `1520`.
+
+The same word appears in three frames — `0x500` bytes 0-1, `0x363` bytes 0-1
+and `0x35F` bytes 2-3 — so any one of them identifies the running firmware
+from a capture alone.
+
+The rest of the image name (`LVESS15…N01`) is not on the CAN bus. Read as a
+build date, `25814` → 2025-08-14 and `26701` → 2026-07-01 would fit the two
+observed names, but that is a guess from two samples and nothing depends on
+it.
+
+## `DY` is Deye
+
+**Confirmed.** The vendor protocol defines `0x35E` bytes 0-1 as the
+manufacturer name, spelled out in the document as *DEYE*, in ASCII. `DY` is
+that abbreviation.
+
+The same two characters appear at the end of `0x35F` (bytes 6-7), which had
+been recorded as an undocumented suffix. `0x35F` turns out to be the same
+identity data rearranged:
+
+```
+0x35E   44 59 | 30 30 31 | 1C    | FC 08     "DY"  "001"  cell 0x1C  2300
+0x35F   00 1C | F0 05    | FC 08 | 44 59     cell 0x1C  F005  2300  "DY"
+```
+
+## Open: cell manufacturer code `0x1C`
+
+**Unknown.** `0x35E` byte 5 reads `0x1C` (28) on every frame captured — 337
+identical `0x35E` payloads, with no variation. The low byte of `0x35F` carries
+the same value, so it is a real identity field rather than padding, and the
+byte assignment is right.
+
+It cannot be resolved from the documentation available: the V3.3 protocol
+lists only `1 = GOTION`, `2 = CATL`, `3 = EVE`. 28 is not in that list, and no
+other cell-vendor name appears anywhere in the document. Either the list has
+grown since V3.3 or this firmware encodes it differently.
+
+Settling it needs a newer protocol revision, or the vendor confirming which
+cells an SE-F12-C contains. Until then it stays a numeric diagnostic.
 
 ## Open: `0x400` system status enumeration
 

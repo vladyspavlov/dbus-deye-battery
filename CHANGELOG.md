@@ -35,6 +35,10 @@ First public release.
   timestamped record in the vendor app, so decoder output is pinned against the
   manufacturer's own labels rather than only against our reading of a document.
 
+- `identity.pack_firmware_marker` and `victron_identity.firmware_marker`,
+  rendering the version word the way the vendor names its images (`F005`)
+  rather than as the raw integer `1520`.
+
 ### Changed
 
 - Resolved the `0x550` unit, previously left open: the accumulated counters are

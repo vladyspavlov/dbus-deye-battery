@@ -164,6 +164,17 @@ def _active_table_bits(data: bytes) -> list[str]:
     return active
 
 
+def _firmware_marker(data: bytes) -> str:
+    """Render the two-byte version word the way the vendor names its images.
+
+    The bytes printed as hex digits are the ``F`` designation in the vendor's
+    firmware image name: ``F0 05`` reads ``F005``, and the image installed on
+    the reference pack is ``LVESS1526701N01_F005``.  The same word appears in
+    0x500, 0x363 and 0x35F.
+    """
+    return data[:2].hex().upper()
+
+
 def _ascii(data: bytes) -> tuple[str | None, bool]:
     printable = all(32 <= byte <= 126 for byte in data)
     return (data.decode("ascii") if printable else None, printable)
@@ -519,9 +530,12 @@ class DeyeDecoder:
         return [
             _field(frame, "victron_identity.frame_35f_seen", True, None, SESSION),
             _field(frame, "victron_identity.battery_model_raw", model_raw, None, SESSION,
-                   note="Victron marks the type ID as not implemented"),
+                   note="Type ID not implemented; low byte repeats the 0x35E cell-manufacturer code"),
             _field(frame, "victron_identity.firmware_version_big_endian", firmware_big_endian, None, SESSION,
-                   note="MSB-first ordering; display formatting is undocumented"),
+                   note="MSB-first ordering; renders as the vendor F-number"),
+            _field(frame, "victron_identity.firmware_marker", _firmware_marker(frame.payload[2:4]), None, SESSION,
+                   confidence="high",
+                   note="Same version word as 0x500 and 0x363, rendered as the vendor's image suffix"),
             _field(frame, "victron_identity.firmware_version_little_endian", firmware_little_endian, None, SESSION,
                    note="Matches the Deye 0x363/0x500 version word"),
             _field(frame, "victron_identity.online_capacity_raw", capacity_raw, None, SESSION),
@@ -633,7 +647,7 @@ class DeyeDecoder:
                 None,
                 SESSION,
             ),
-            _field(frame, "identity.cell_manufacturer_code", frame.payload[5], None, SESSION, note="Live 0x1C is absent from the V3.3 code list"),
+            _field(frame, "identity.cell_manufacturer_code", frame.payload[5], None, SESSION, note="V3.3 lists only 1=GOTION, 2=CATL, 3=EVE; live 0x1C (28) is absent from it and repeats in 0x35F byte 1"),
             _field(
                 frame,
                 "battery.installed_capacity",
@@ -667,7 +681,10 @@ class DeyeDecoder:
         victron_current = -raw_deye_current
         soc = _scaled(_u16(frame.payload, 4), 10, 1)
         soh = _scaled(_u16(frame.payload, 6), 10, 1)
-        note = "SE-F12-C observation; absent from public Deye V1.0"
+        note = (
+            "Absent from public Deye V1.0; values confirmed against the "
+            "vendor app at a matching timestamp"
+        )
         return [
             _field(frame, "diagnostics.voltage_150", voltage, "V", OPTIONAL, valid=_in_range(voltage, 35, 65), confidence="high", note=note),
             _field(frame, "diagnostics.current_raw_deye_150", raw_deye_current, "A", OPTIONAL, valid=_in_range(raw_deye_current, -1000, 1000), confidence="high", note=note),
@@ -793,6 +810,9 @@ class DeyeDecoder:
         marker_valid = frame.payload[2] == 0xAA
         return [
             _field(frame, "identity.pack_software_version_raw", _u16(frame.payload, 0), None, SESSION),
+            _field(frame, "identity.pack_firmware_marker", _firmware_marker(frame.payload), None, SESSION,
+                   confidence="high",
+                   note="Hex-digit render of bytes 0-1; matches the '_F005' suffix of the vendor image name"),
             _field(frame, "identity.boot_version_marker_valid", marker_valid, None, SESSION, valid=marker_valid),
             _field(frame, "identity.boot_version", boot_version, None, SESSION, valid=printable),
         ]

@@ -111,3 +111,64 @@ def test_cell_positions_are_absent_from_can():
         everything.update(decoded(can_id))
     assert not [name for name in everything if "position" in name.lower()]
     assert not [name for name in everything if name.endswith("cell_id")]
+
+
+# --- identity, checked against the app and the vendor protocol ----------
+
+
+def victron_decoded(can_id: str, payload: str) -> dict:
+    from deye_virtual_battery.profile import VICTRON_CAN
+
+    decoder = DeyeDecoder(profile_resolver=lambda _t: VICTRON_CAN)
+    frame = parse_candump_line(f"({TIMESTAMP:.6f}) can0 {can_id}#{payload} R")
+    return {field.name: field.value for field in decoder.decode(frame)}
+
+
+def plain_decoded(can_id: str, payload: str) -> dict:
+    frame = parse_candump_line(f"({TIMESTAMP:.6f}) can0 {can_id}#{payload} R")
+    return {field.name: field.value for field in DeyeDecoder().decode(frame)}
+
+
+def test_the_firmware_marker_renders_as_the_vendor_names_its_images():
+    """The vendor installed `LVESS1526701N01_F005`; the wire says `F0 05`.
+
+    Read as hex digits the version word is the vendor's own `F` designation,
+    which is far more useful than the raw integer 1520.
+    """
+    assert plain_decoded("500", "F005AA56312E3046")["identity.pack_firmware_marker"] == "F005"
+    assert plain_decoded("500", "F002AA56312E3046")["identity.pack_firmware_marker"] == "F002"
+
+
+def test_the_same_firmware_word_appears_in_three_frames():
+    """0x500, 0x363 and 0x35F all carry it, so any one of them identifies it."""
+    assert plain_decoded("500", "F005AA56312E3046")["identity.pack_firmware_marker"] == "F005"
+    assert victron_decoded("35F", "001CF005FC084459")["victron_identity.firmware_marker"] == "F005"
+    assert plain_decoded("363", "F005F00500000000")["identity.host_software_version_raw"] == 1520
+
+
+def test_dy_is_the_manufacturer_abbreviation_for_deye():
+    """The vendor protocol defines 0x35E bytes 0-1 as the DEYE name in ASCII.
+
+    The same two characters appear at the end of 0x35F, which is the identity
+    data rearranged rather than an undocumented field.
+    """
+    assert plain_decoded("35E", "44593030311CFC08")["identity.manufacturer"] == "DY"
+    assert victron_decoded("35F", "001CF005FC084459")["victron_identity.frame_35f_suffix"] == "DY"
+
+
+def test_the_cell_manufacturer_code_repeats_across_both_identity_frames():
+    """0x1C is not in the protocol's code list, but it is consistent.
+
+    0x35E byte 5 and the low byte of 0x35F both carry it, which is why it is
+    kept as a numeric diagnostic rather than being guessed at.
+    """
+    assert plain_decoded("35E", "44593030311CFC08")["identity.cell_manufacturer_code"] == 0x1C
+    assert victron_decoded("35F", "001CF005FC084459")["victron_identity.battery_model_raw"] == "001C"
+
+
+def test_online_capacity_conflict_is_preserved_not_corrected():
+    """0x35F sends 2300 where whole amp-hours are expected: the Deye 0.1 Ah
+    encoding of the same 230 Ah pack. Reported, never published as Ah."""
+    values = victron_decoded("35F", "001CF005FC084459")
+    assert values["victron_identity.online_capacity_raw"] == 2300
+    assert values["victron_identity.online_capacity_ah_deye_scaling"] == 230.0
