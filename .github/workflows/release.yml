@@ -1,0 +1,60 @@
+name: release
+
+# A release is an immutable artifact people install onto live inverter
+# hardware, so the tag, the packaged version and the tests must all agree
+# before anything is published.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The tag must match the packaged version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          packaged=$(sed -n 's/^VERSION = "\(.*\)"$/\1/p' src/deye_virtual_battery/version.py)
+          echo "tag=$tag packaged=$packaged"
+          if [ "$tag" != "$packaged" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match VERSION ${packaged}."
+            echo "::error::A release whose version string differs from its code is worse than no release."
+            exit 1
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -e ".[dev]"
+
+      - name: Tests must pass before publishing
+        run: pytest -q
+
+      - name: Extract this version's changelog section
+        run: |
+          python3 - "${GITHUB_REF_NAME#v}" > release-notes.md <<'PY'
+          import sys, pathlib, re
+          version = sys.argv[1]
+          text = pathlib.Path("CHANGELOG.md").read_text()
+          match = re.search(
+              rf"^## {re.escape(version)}\s*$(.*?)(?=^## |\Z)", text, re.M | re.S
+          )
+          if not match:
+              sys.exit(f"CHANGELOG.md has no '## {version}' section")
+          print(match.group(1).strip())
+          PY
+          cat release-notes.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file release-notes.md

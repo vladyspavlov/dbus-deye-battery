@@ -3,7 +3,7 @@
 Versions are strictly numeric: Venus OS and VRM display `/Mgmt/ProcessVersion`
 verbatim, so no suffixes or build tags appear here.
 
-## Unreleased
+## 0.7.4
 
 ### Changed
 - **The driver is no longer tied to one battery model.** The series cell count

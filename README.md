@@ -326,13 +326,23 @@ battery identity. It is the reason this driver publishes a neutral
 
 ### 1. Copy and install
 
+Install a **release**, not the `main` branch. A release is a fixed set of
+files, so the version the driver reports on D-Bus and in VRM always maps back
+to exact code — which is what you need when something misbehaves at 2am.
+
 ```sh
+VERSION=0.7.4          # see the Releases page for the current one
+
 cd /data
-wget -O deye.tar.gz https://github.com/vladyspavlov/dbus-deye-battery/archive/refs/heads/main.tar.gz
+wget -O deye.tar.gz https://github.com/vladyspavlov/dbus-deye-battery/archive/refs/tags/v$VERSION.tar.gz
 tar xzf deye.tar.gz
-cd dbus-deye-battery-main
+cd dbus-deye-battery-$VERSION
 sh install/install.sh
 ```
+
+Installing from `main` is fine for development, but `main` moves. Two people
+installing a week apart get different code with no way to tell, which is a poor
+property for something that writes charge limits to an inverter.
 
 The installer backs up any existing install to a timestamped
 `/data/deye-virtual-battery/.backup-src-*` directory, writes the source to
