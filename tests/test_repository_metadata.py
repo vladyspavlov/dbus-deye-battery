@@ -8,7 +8,6 @@ the kind of mistake nobody notices until a stranger follows the instructions.
 """
 
 import re
-import tomllib
 from pathlib import Path
 
 from deye_virtual_battery.version import VERSION
@@ -20,21 +19,37 @@ DESCRIPTION = "Victron Venus OS battery driver for Deye SE-F LV packs over BMS-C
 READMES = ("README.md", "README.uk.md")
 
 
-def pyproject() -> dict:
-    return tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+# tomllib is 3.11+; the supported floor is 3.10, and a test guarding project
+# metadata is not worth a dependency. These keys are one plain line each.
+def pyproject(key: str) -> str:
+    found = re.search(
+        rf'^{key} = "([^"]+)"$', (ROOT / "pyproject.toml").read_text(), re.M
+    )
+    assert found, f"pyproject.toml has no {key}"
+    return found.group(1)
+
+
+def project_urls() -> dict:
+    block = re.search(
+        r"^\[project\.urls\]\n((?:.+\n)+)", (ROOT / "pyproject.toml").read_text(), re.M
+    )
+    assert block, "pyproject.toml has no [project.urls]"
+    return dict(re.findall(r'^(\w+) = "([^"]+)"$', block.group(1), re.M))
 
 
 def test_the_distribution_is_named_after_the_repository():
-    assert pyproject()["name"] == REPOSITORY
+    assert pyproject("name") == REPOSITORY
 
 
 def test_every_project_url_points_at_that_repository():
-    for name, url in pyproject()["urls"].items():
+    urls = project_urls()
+    assert urls, "no URLs parsed"
+    for name, url in urls.items():
         assert f"/{REPOSITORY}" in url, f"{name} -> {url}"
 
 
 def test_one_description_is_used_everywhere():
-    assert pyproject()["description"] == DESCRIPTION
+    assert pyproject("description") == DESCRIPTION
     assert DESCRIPTION in (ROOT / "README.md").read_text()
     assert (ROOT / "NOTICE").read_text().startswith(REPOSITORY + "\n")
 
