@@ -2,15 +2,31 @@
 
 A Venus OS battery driver for **Deye SE-F12** low-voltage packs on BMS-Can.
 
-Venus OS ships a closed CAN battery driver that identifies a battery from the
-frames it sends. Current Deye firmware no longer sends the vendor marker that
-driver looks for, so the pack is misidentified as a different manufacturer's
-battery — and vendor-specific protection logic written for that other battery
-is then applied to yours.
+## The problem this solves
+
+**Out of the box, Venus OS identifies a Deye SE-F12 as an LG RESU.**
+
+Venus ships a closed CAN battery driver that works out the manufacturer from
+the frames on the wire. Current Deye firmware no longer sends the vendor marker
+that driver looks for, so it falls through to LG's product ID (`0xB004`). Three
+things then go wrong, and none of them announce themselves:
+
+1. **LG-specific protection logic is applied to your battery.** Venus binds an
+   LG circuit-breaker detector to anything claiming that product ID. It watches
+   for a voltage pattern LG packs produce and, when it thinks it sees one, it
+   **switches the inverter off** — taking AC output down. It is not reading a
+   Deye alarm; it synthesises the condition itself.
+2. **Alarms are wrong.** The Deye reports its faults in vendor condition tables
+   the stock driver does not decode. Real protections can go unreported, and
+   conditions that are not faults can surface as ones that are.
+3. **The current sign can be inverted.** Deye and Victron disagree on which
+   direction is positive, and the answer changes with the battery's selected
+   protocol — so charge can be displayed and logged as discharge.
 
 This driver decodes the Deye protocol directly and publishes a normal
-`com.victronenergy.battery.*` D-Bus service, so Venus sees the pack as what it
-actually is.
+`com.victronenergy.battery.*` D-Bus service with an honest identity, so no
+vendor-specific logic binds to it, alarms come from the Deye's own condition
+tables, and the current sign is resolved from the frames actually on the wire.
 
 ---
 
@@ -34,48 +50,47 @@ are responsible for your own system.
 
 ---
 
-## ☠️ DANGER — the CAN cable is not a straight-through Ethernet cable
+## ☠️ DANGER — wire ONLY two pins
 
-**Using an ordinary patch cable between the Deye PCS port and Victron BMS-Can
-will put Victron's CAN signals onto the battery's RS485 pins and can destroy
-the battery BMS.** Only pins 4 and 5 on the Deye side may be connected.
-
-Confirmed from both vendors' own documentation:
-
-| | pin 1 | pin 2 | pin 3 | **pin 4** | **pin 5** | pin 6 | pin 7 | pin 8 |
-|---|---|---|---|---|---|---|---|---|
-| **Deye PCS port** | 485-B | 485-A | – | **CANH** | **CANL** | – | 485-A | 485-B |
-| **Victron BMS-Can** | – | – | GND | – | – | – | **CAN-H** | **CAN-L** |
-
-Only two conductors, crossed 4→7 and 5→8:
+**Connect exactly two conductors. Nothing else.**
 
 ```
-      DEYE  "PCS" port                      VICTRON  BMS-Can
-      (RJ45)                                (RJ45)
+        DEYE  "PCS" port                 VICTRON  BMS-Can / VE.Can
 
-   1  485-B   ○      ✗ leave unconnected       ○  1
-   2  485-A   ○      ✗ leave unconnected       ○  2
-   3   --     ○      ✗ leave unconnected       ○  3  GND
-   4  CANH    ●──────────────┐                 ○  4
-   5  CANL    ●───────────┐  │                 ○  5
-   6   --     ○      ✗    │  │                 ○  6
-   7  485-A   ○      ✗    │  └───────────────► ●  7  CAN-H
-   8  485-B   ○      ✗    └──────────────────► ●  8  CAN-L
+     pin 4  CANH  ●──────────────────►  ●  pin 7  CAN-H
+     pin 5  CANL  ●──────────────────►  ●  pin 8  CAN-L
 
-        ● = connected        ○ = MUST stay unconnected
+     every other pin on both sides:  LEAVE COMPLETELY UNCONNECTED
 ```
 
-**Why a straight-through cable is destructive:** Victron drives CAN-H on pin 7
-and CAN-L on pin 8. Straight through, those land on Deye pins 7 and 8 — which
-are **485-A and 485-B**. That feeds CAN transceiver levels straight into the
-battery's RS485 transceiver.
+| Deye PCS | | Victron |
+|---|---|---|
+| **pin 4** CANH | → | **pin 7** CAN-H |
+| **pin 5** CANL | → | **pin 8** CAN-L |
 
-Use the battery's `PCS` port, not `IN` or `OUT`. The `IN`/`OUT` ports are for
-battery-to-battery parallel links and have a completely different pinout
-(CANL/CANH on pins 1/2 and 7/8).
+**Anything else connected will destroy the battery BMS.** The Victron side is
+not a passive data port: pins other than 7 and 8 carry supply and return
+voltages, and putting those onto the Deye PCS connector — whose remaining pins
+are RS485 and internal signals — damages the BMS. This is not a
+"might be a problem" caution; treat any extra conductor as a dead BMS.
 
-Terminate the bus per
-[Victron's cable guidance](https://www.victronenergy.com/live/battery_compatibility:can-bus_bms-cable).
+Victron's own guidance says the same thing:
+
+> *"Only use CAN-H and CAN-L. No other wires."*
+
+Do **not** use an ordinary straight-through Ethernet patch cable. It connects
+all eight conductors, which is exactly the failure above. Either buy the
+correct cable or crimp one with two wires and verify it with a meter before
+plugging anything in.
+
+Also:
+
+- Use the battery's **`PCS`** port. The `IN` and `OUT` ports are for
+  battery-to-battery parallel links and have a different pinout again.
+- Do not wire GND. Victron advises against it on non-isolated GX ports because
+  it creates a ground loop.
+- Terminate the bus per
+  [Victron's cable guidance](https://www.victronenergy.com/live/battery_compatibility:can-bus_bms-cable).
 
 ---
 
