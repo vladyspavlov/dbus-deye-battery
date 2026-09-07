@@ -132,6 +132,14 @@ Also:
 
 ## Tested scope
 
+**Nothing in the driver is tied to one model.** Capacity, series cell count,
+protocol profile and current sign are all read from the battery, and every pack
+voltage threshold scales from the measured series count. The only model-specific
+value is the name shown in the GX device list, which no Deye pack transmits —
+set it with `MODEL=` if you want your exact variant displayed.
+
+Developed and running against:
+
 | | |
 |---|---|
 | Battery | Deye SE-F12-C, 230 Ah, 16-series |
@@ -140,15 +148,34 @@ Also:
 | Venus OS | v3.75, armv7l, Python 3.12 |
 | Bus | BMS-Can, 500 kbit/s, classical 11-bit frames |
 
-**Not tested, but likely compatible:** the **SE-F5-C** and **SE-F16-C** are
-the same SE-F series with the same PCS interface, so they almost certainly
-speak the same protocol — only the cell count and capacity should differ. The
-driver reads capacity from the battery rather than assuming it, so it should
-adapt. Nobody has confirmed this on hardware.
+**Not tested, but expected to work:** the **SE-F5-C** and **SE-F16-C** share
+the SE-F series PCS interface, so they should speak the same protocol —
+differing only in capacity and possibly series count, both of which the driver
+measures rather than assumes. Other Deye LV packs are plausible for the same
+reason.
 
-Other Deye families are unverified. If you run it on anything other than an
-SE-F12-C, please open an issue with a `candump` log — that is the single most
-useful thing you can contribute.
+Nobody has confirmed any of that on hardware. If you run it on anything other
+than an SE-F12-C, please open an issue with a `candump` log — that is the
+single most useful thing you can contribute, and it is what turns "expected to
+work" into "tested".
+
+What the driver measures for itself:
+
+| Property | Source |
+|---|---|
+| Nominal capacity | `0x35E` bytes 6-7 |
+| Series cell count | pack voltage ÷ mean cell voltage, cross-checked |
+| Pack voltage thresholds | series count × per-cell limits |
+| Protocol profile | frames present on the wire |
+| Current sign | follows the detected profile |
+| Serial | `0x600` + `0x650` |
+| Firmware marker | `0x500` / `0x363` / `0x35F` |
+
+If the series count cannot be measured — cell voltages missing, or the numbers
+disagree — the driver falls back to 16 and publishes
+`/HardwareVersion` as `… (assumed)` rather than pretending it measured
+something. Override with `CELL_COUNT=` if your pack is different and its cell
+data is unavailable.
 
 ---
 

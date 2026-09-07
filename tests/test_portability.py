@@ -175,3 +175,86 @@ def test_a_second_pack_can_be_published_without_colliding():
             "--device-instance", "514",
         )
     )
+
+
+# --- the adapter must not be tied to one battery model -------------------
+
+
+def cells(pack_v, cell_v, spread=0.01):
+    return {
+        "battery.voltage": {"effective_value": pack_v},
+        "cells.max_voltage_200": {"effective_value": cell_v + spread / 2},
+        "cells.min_voltage_200": {"effective_value": cell_v - spread / 2},
+    }
+
+
+def test_series_count_is_measured_not_assumed():
+    """SE-F5, SE-F12 and SE-F16 differ; the pack on the wire decides."""
+    from deye_virtual_battery.policy import detect_cell_count
+
+    for count, cell_v in ((8, 3.30), (15, 3.32), (16, 3.33), (20, 3.31), (24, 3.29)):
+        assert detect_cell_count(cells(round(count * cell_v, 2), cell_v), 16) == (
+            count,
+            True,
+        )
+
+
+def test_pack_thresholds_scale_with_the_measured_series_count():
+    from deye_virtual_battery.policy import PolicyConfig
+
+    sixteen = PolicyConfig().for_pack(cells(53.28, 3.33))
+    assert sixteen.cell_count == 16 and sixteen.cell_count_detected
+
+    # Unchanged for a 16s pack: these are the values the live system uses.
+    assert sixteen.normal_max_voltage_v == 57.6
+    assert sixteen.pack_overvoltage_protection_v == 58.4
+    assert sixteen.provisional_charge_ceiling_v == 57.2
+    assert sixteen.blocked_charge_cvl_v == 55.2
+
+    eight = PolicyConfig().for_pack(cells(26.4, 3.30))
+    assert eight.cell_count == 8
+    assert eight.blocked_charge_cvl_v == 27.6
+    assert eight.pack_overvoltage_protection_v == 29.2
+
+
+def test_an_unmeasurable_pack_falls_back_and_says_so():
+    """Guessing a series count would put the CVL on the wrong pack."""
+    from deye_virtual_battery.policy import PolicyConfig, detect_cell_count
+
+    for broken in (
+        {},
+        {"battery.voltage": {"effective_value": 53.3}},                      # no cells
+        cells(53.3, 3.90),                                                   # inconsistent
+        cells(53.3, 0.0),                                                    # zero cells
+        cells(200.0, 3.30),                                                  # 60s, out of range
+    ):
+        count, detected = detect_cell_count(broken, 16)
+        assert (count, detected) == (16, False), broken
+
+    config = PolicyConfig().for_pack({})
+    assert config.cell_count_detected is False
+    assert "assumed" in _hw(config)
+
+
+def _hw(config):
+    from deye_virtual_battery.venus_bms_publisher import _hardware_version
+
+    return _hardware_version(config, None)
+
+
+def test_the_model_name_is_the_operators_to_set():
+    """No Deye pack transmits its model designation, so it cannot be detected."""
+    from deye_virtual_battery.venus_bms_publisher import _product_name
+
+    assert _product_name(None) == "Deye LV battery"
+    assert _product_name("") == "Deye LV battery"
+    assert _product_name("SE-F16-C") == "Deye SE-F16-C"
+    assert _product_name("SE-F5-C") == "Deye SE-F5-C"
+    # Already qualified, so it is not doubled.
+    assert _product_name("Deye SE-F12-C") == "Deye SE-F12-C"
+
+
+def test_model_and_cell_count_are_accepted_on_the_command_line():
+    _validate(args("--model", "SE-F16-C", "--cell-count", "16"))
+    assert args().model is None
+    assert args().cell_count is None

@@ -143,7 +143,10 @@ def test_commissioning_service_is_neutral_selectable_and_keeps_deye_limits():
     dynamic = _add_bms_paths(service, model["paths"], config=PolicyConfig())
 
     assert service.paths["/ProductId"] == 0xFFFF
-    assert service.paths["/CustomName"] == "Deye SE-F12-C"
+    # No model is baked in: the operator names their variant with --model,
+    # because no Deye pack transmits its model designation.
+    assert service.paths["/CustomName"] == "Deye LV battery"
+    assert service.paths["/ProductName"] == "Deye LV battery"
     assert service.paths["/Info/MaxChargeVoltage"] == 55.2
     assert service.paths["/Info/MaxChargeCurrent"] == 0.0
     assert service.paths["/Info/MaxDischargeCurrent"] == 230.0

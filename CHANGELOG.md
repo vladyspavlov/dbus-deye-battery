@@ -3,6 +3,24 @@
 Versions are strictly numeric: Venus OS and VRM display `/Mgmt/ProcessVersion`
 verbatim, so no suffixes or build tags appear here.
 
+## Unreleased
+
+### Changed
+- **The driver is no longer tied to one battery model.** The series cell count
+  is measured from the pack and cell voltages, and every pack voltage threshold
+  now scales from it instead of being fixed for a 16-series pack. A 16s pack
+  produces exactly the previous values (57.6 / 58.4 / 57.2 / 55.2 V), so
+  behaviour on an SE-F12-C is unchanged.
+- The GX device name is no longer hardcoded to `Deye SE-F12-C`. No Deye pack
+  transmits its model designation, so it cannot be detected; set `MODEL=` to
+  show your variant, or accept the generic default.
+
+### Added
+- `--model` and `--cell-count`, with `MODEL=` and `CELL_COUNT=` in the install
+  config. `--cell-count` only applies when the count cannot be measured.
+- `/HardwareVersion` reports the measured series count, marked `(assumed)` when
+  it had to fall back.
+
 ## 0.7.3
 
 ### Added

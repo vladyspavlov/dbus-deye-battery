@@ -8,7 +8,7 @@ approved production settings.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from .decoder import VICTRON_ALARM_ACTIVE, VICTRON_ALARM_PATHS
@@ -221,16 +221,64 @@ def required_control_fields(
     return REQUIRED_CONTROL_FIELDS
 
 
+# A series count is only believable if the pack voltage really is that many
+# cells of the measured size.  Anything outside this range, or that fails the
+# residual check, means the reading is not trustworthy and the fallback is used.
+MINIMUM_CELL_COUNT = 4
+MAXIMUM_CELL_COUNT = 32
+CELL_COUNT_TOLERANCE_V = 0.25
+
+
+def detect_cell_count(fields: dict[str, Any], fallback: int) -> tuple[int, bool]:
+    """Work out the series cell count from the pack and cell voltages.
+
+    The adapter is not tied to one model.  SE-F5, SE-F12 and SE-F16 differ in
+    capacity and series count, and capacity already comes off the wire, so the
+    only remaining model-specific number is how many cells are in series.
+    Dividing the pack voltage by the mean cell voltage gives it directly.
+
+    Returns ``(count, detected)``.  ``detected`` is False when the inputs are
+    missing or do not agree, in which case the caller's fallback is used and
+    the adapter says so rather than pretending it measured something.
+    """
+    pack_voltage = _number(fields, "battery.voltage")
+    maximum = _maximum_effective(fields, ("cells.max_voltage_200", "cells.max_voltage_361"))
+    minimum = _minimum_effective(fields, ("cells.min_voltage_200", "cells.min_voltage_361"))
+    if pack_voltage is None or maximum is None or minimum is None:
+        return fallback, False
+    mean_cell = (maximum + minimum) / 2.0
+    if mean_cell <= 0.5:
+        return fallback, False
+    estimate = pack_voltage / mean_cell
+    count = int(round(estimate))
+    if not MINIMUM_CELL_COUNT <= count <= MAXIMUM_CELL_COUNT:
+        return fallback, False
+    # Reject a count that does not reconstruct the measured pack voltage: a
+    # partially stale snapshot can otherwise produce a plausible-looking integer.
+    if abs(count * mean_cell - pack_voltage) > CELL_COUNT_TOLERANCE_V:
+        return fallback, False
+    return count, True
+
+
 @dataclass(frozen=True, slots=True)
 class PolicyConfig:
     """Provisional values used only by the local shadow model."""
 
-    normal_max_voltage_v: float = 57.6
-    pack_overvoltage_protection_v: float = 58.4
+    # Pack voltage thresholds are per cell, multiplied by the detected series
+    # count, so one configuration covers every pack in the family instead of
+    # hard-coding one model.  For a 16s pack these reproduce the previous fixed
+    # values exactly: 3.60 -> 57.6, 3.65 -> 58.4, 3.575 -> 57.2, 3.45 -> 55.2.
+    normal_max_cell_v: float = 3.60
+    pack_overvoltage_cell_v: float = 3.65
+    provisional_charge_ceiling_cell_v: float = 3.575
+    blocked_charge_cell_v: float = 3.45
+    # Used only when the series count cannot be measured from the wire.
+    fallback_cell_count: int = 16
+    cell_count: int = 16
+    cell_count_detected: bool = False
     high_cell_protection_v: float = 3.65
     voltage_delta_warning_v: float = 1.0
     voltage_delta_alarm_v: float = 5.0
-    provisional_charge_ceiling_v: float = 57.2
     # A healthy managed-battery integration keeps the charge current limit
     # well above a trickle during normal operation.  A quarter of the pack
     # capacity in Ah is the threshold this project reports against.  The
@@ -243,9 +291,38 @@ class PolicyConfig:
     # value while the battery blocks charge.  55.2 V is 3.45 V/cell for a
     # 16-series pack and remains a commissioning value pending bench
     # validation -- see the calibration note in README.md.
-    blocked_charge_cvl_v: float = 55.2
     product_id: int = 0xFFFF
     device_instance: int = 513
+
+    @property
+    def normal_max_voltage_v(self) -> float:
+        return round(self.normal_max_cell_v * self.cell_count, 3)
+
+    @property
+    def pack_overvoltage_protection_v(self) -> float:
+        return round(self.pack_overvoltage_cell_v * self.cell_count, 3)
+
+    @property
+    def provisional_charge_ceiling_v(self) -> float:
+        return round(self.provisional_charge_ceiling_cell_v * self.cell_count, 3)
+
+    @property
+    def blocked_charge_cvl_v(self) -> float:
+        """Fixed conservative CVL used while the battery blocks charge.
+
+        Deliberately not derived from measured pack voltage minus an offset:
+        that creates a feedback loop that can walk the target away from the
+        intended value. 3.45 V/cell remains a commissioning value pending bench
+        validation -- see the calibration note in README.md.
+        """
+        return round(self.blocked_charge_cell_v * self.cell_count, 3)
+
+    def for_pack(self, fields: dict[str, Any]) -> "PolicyConfig":
+        """Return this configuration bound to the pack actually on the wire."""
+        count, detected = detect_cell_count(fields, self.fallback_cell_count)
+        if count == self.cell_count and detected == self.cell_count_detected:
+            return self
+        return replace(self, cell_count=count, cell_count_detected=detected)
 
 
 def evaluate_policy(
@@ -258,6 +335,9 @@ def evaluate_policy(
 
     config = config or PolicyConfig()
     fields = snapshot.get("fields", {})
+    # Bind the pack thresholds to this battery's series count before any
+    # voltage comparison uses them.
+    config = config.for_pack(fields)
     profile_state = snapshot.get("protocol_profile") or {}
     profile = profile_state.get("profile", UNKNOWN)
     in_transition = bool(profile_state.get("in_transition"))
@@ -584,3 +664,10 @@ def _maximum_effective(fields: dict[str, Any], names: tuple[str, ...]) -> float 
     values = [_number(fields, name) for name in names]
     present = [value for value in values if value is not None]
     return max(present) if present else None
+
+
+
+def _minimum_effective(fields: dict[str, Any], names: tuple[str, ...]) -> float | None:
+    values = [_number(fields, name) for name in names]
+    present = [value for value in values if value is not None]
+    return min(present) if present else None

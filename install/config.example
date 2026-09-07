@@ -10,6 +10,16 @@ CAN_INTERFACE=can0
 SERVICE_NAME=com.victronenergy.battery.deye_se_f12
 DEVICE_INSTANCE=513
 
+# Model designation shown in the GX device list, e.g. SE-F12-C, SE-F5-C,
+# SE-F16-C.  No Deye pack transmits its model over CAN, so this cannot be
+# detected and is purely cosmetic.  Leave empty for a generic name.
+MODEL=
+
+# Series cell count to assume ONLY if it cannot be measured from the pack and
+# cell voltages.  Normally leave this alone: the count is measured on the fly,
+# and every pack voltage threshold scales from it.
+CELL_COUNT=
+
 # VE.Bus service used for the DC voltage cross-check.  Leave empty to discover
 # it automatically, which is correct for almost every installation.
 VEBUS_SERVICE=

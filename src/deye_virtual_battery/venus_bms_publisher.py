@@ -17,6 +17,7 @@ therefore a live control change requiring a separate approved procedure.
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import logging
 import re
 from pathlib import Path
@@ -160,12 +161,38 @@ def _tx_values(snapshot: KeepaliveSnapshot) -> dict[str, Any]:
     }
 
 
+DEFAULT_MODEL_NAME = "Deye LV battery"
+
+
+def _product_name(model: str | None) -> str:
+    """Name the device for the GX list.
+
+    The model designation is not transmitted on CAN by any Deye pack observed,
+    so it cannot be detected. It is cosmetic, and the operator supplies it with
+    --model when they want their exact variant shown.
+    """
+    model = (model or "").strip()
+    if not model:
+        return DEFAULT_MODEL_NAME
+    return model if model.lower().startswith("deye") else f"Deye {model}"
+
+
+def _hardware_version(config: PolicyConfig, model: str | None) -> str:
+    """Describe the pack from what was measured, not from an assumption."""
+    series = f"{config.cell_count}s"
+    if not config.cell_count_detected:
+        series += " (assumed)"
+    model = (model or "").strip()
+    return f"{model} {series}".strip()
+
+
 def _fixed_paths(
     config: PolicyConfig,
     *,
     can_tx_enabled: bool = False,
     interface: str = "can0",
     serial: str | None = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
     return {
         "/Mgmt/ProcessName": __file__,
@@ -175,8 +202,11 @@ def _fixed_paths(
         ),
         "/DeviceInstance": DEVICE_INSTANCE,
         "/ProductId": PRODUCT_ID,
-        "/ProductName": "Deye SE-F12-C",
-        "/CustomName": "Deye SE-F12-C",
+        # Nothing here is tied to one model.  Capacity and series count come
+        # off the wire; the model name does not appear in the protocol at all,
+        # so it is the operator's to set and defaults to the family name.
+        "/ProductName": _product_name(model),
+        "/CustomName": _product_name(model),
         "/Manufacturer": "Deye",
         # Device information, registered once at qualification and never
         # updated.  Keeping it out of the dynamic set means the update loop
@@ -184,7 +214,7 @@ def _fixed_paths(
         # invalid value rather than appearing later as a different type.
         "/Serial": serial,
         "/FirmwareVersion": PROCESS_VERSION,
-        "/HardwareVersion": "SE-F12-C",
+        "/HardwareVersion": _hardware_version(config, model),
         "/Capabilities/ChargeVoltageControl": 0,
         "/Diagnostics/Commissioning/Selectable": 1,
         "/Diagnostics/Commissioning/NoCanTransmit": int(not can_tx_enabled),
@@ -212,9 +242,14 @@ def _add_paths(
     transmitter_snapshot: KeepaliveSnapshot | None = None,
     interface: str = "can0",
     serial: str | None = None,
+    model: str | None = None,
 ) -> set[str]:
     fixed = _fixed_paths(
-        config, can_tx_enabled=can_tx_enabled, interface=interface, serial=serial
+        config,
+        can_tx_enabled=can_tx_enabled,
+        interface=interface,
+        serial=serial,
+        model=model,
     )
     for path, value in fixed.items():
         service.add_path(path, value)
@@ -309,6 +344,10 @@ def run(arguments: argparse.Namespace) -> int:
     config = PolicyConfig(
         product_id=PRODUCT_ID, device_instance=arguments.device_instance
     )
+    if arguments.cell_count:
+        config = replace(
+            config, cell_count=arguments.cell_count, fallback_cell_count=arguments.cell_count
+        )
     core = VenusPublisherCore(policy_config=config)
     runtime_clock = RuntimeClock()
     service = None
@@ -322,6 +361,14 @@ def run(arguments: argparse.Namespace) -> int:
             vebus=vebus,
         )
         assert core.last_model is not None
+        # Publish thresholds for the pack actually on the wire, not for a
+        # model this code was written against.
+        config = config.for_pack(core.last_model.get("fields", {}))
+        logging.info(
+            "pack series count: %ss (%s)",
+            config.cell_count,
+            "measured" if config.cell_count_detected else "assumed",
+        )
         service = VeDbusService(arguments.service_name, register=False)
         dynamic_paths = _add_paths(
             service,
@@ -331,6 +378,7 @@ def run(arguments: argparse.Namespace) -> int:
             transmitter_snapshot=transmitter.snapshot(),
             interface=arguments.interface,
             serial=core.last_model["paths"].get("/Serial"),
+            model=arguments.model,
         )
         service.register()
         main_loop = GLib.MainLoop()
@@ -433,6 +481,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--duration-seconds", type=float)
     parser.add_argument("--require-no-bms-control", action="store_true")
     parser.add_argument("--allow-can-transmit", action="store_true")
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="model designation shown in the GX device list, e.g. SE-F12-C. "
+        "Not transmitted on CAN, so it cannot be detected.",
+    )
+    parser.add_argument(
+        "--cell-count",
+        type=int,
+        default=None,
+        help="series cell count to assume if it cannot be measured from the "
+        "pack and cell voltages (default 16)",
+    )
     parser.add_argument("--log-level", default="INFO")
     return parser
 
