@@ -25,7 +25,7 @@ jobs:
       # bootstrap inside it.  Without these they skip, which would quietly
       # stop covering the one file people run as root on live hardware.
       - run: sudo apt-get update && sudo apt-get install -y bubblewrap dash
-      - run: pytest -q
+      - run: GX_SANDBOX_REQUIRED=1 pytest -q
 
   shellcheck:
     runs-on: ubuntu-latest

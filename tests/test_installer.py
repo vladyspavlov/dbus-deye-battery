@@ -26,10 +26,24 @@ VERSION = re.search(
     r'^VERSION = "([^"]+)"', (ROOT / "src/deye_virtual_battery/version.py").read_text(), re.M
 ).group(1)
 
+# CI sets GX_SANDBOX_REQUIRED=1: the installer is the one file people run as
+# root on live hardware, so its coverage must not vanish quietly because a
+# dependency went missing.
+SANDBOX_REQUIRED = os.environ.get("GX_SANDBOX_REQUIRED") == "1"
+SANDBOX_MISSING = shutil.which("bwrap") is None or shutil.which("dash") is None
+
 needs_sandbox = pytest.mark.skipif(
-    shutil.which("bwrap") is None or shutil.which("dash") is None,
+    SANDBOX_MISSING and not SANDBOX_REQUIRED,
     reason="the fake GX needs bubblewrap and dash",
 )
+
+
+@needs_sandbox
+def test_the_fake_gx_can_actually_run_here():
+    assert not SANDBOX_MISSING, "bubblewrap and dash are required in this environment"
+    done = run_in_gx("echo alive")
+    assert done.returncode != 127, "no usable namespace configuration on this host"
+    assert "alive" in done.stdout, done.stderr
 
 
 def run_in_gx(script: str, version: str = VERSION, **env: str):

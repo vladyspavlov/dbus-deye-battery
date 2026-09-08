@@ -196,17 +196,29 @@ mkdir -p "$work/log"
 : > "$work/log/candump"
 echo "${GX_LATEST_VERSION:-$version}" > "$work/log/latest"
 
-# Prefer a fully isolated sandbox.  Some CI hosts refuse to let an unprivileged
-# namespace configure its own loopback ("Failed RTM_NEWADDR"), so fall back to
-# keeping the host network -- every other namespace is still unshared, and the
-# download stubs are what the tests assert on either way.
-namespaces="--unshare-all"
-if ! bwrap --unshare-all --ro-bind /usr /usr /usr/bin/true >/dev/null 2>&1; then
-    # Exactly what --unshare-all does, minus the network.  The -try forms
-    # matter: where bwrap is setuid rather than using an unprivileged user
-    # namespace, a hard --unshare-user cannot set up the uid map.
-    namespaces="--unshare-user-try --unshare-ipc --unshare-pid --unshare-uts --unshare-cgroup-try"
-fi
+# How much can be isolated varies by host: some CI machines refuse to let an
+# unprivileged namespace bring up its own loopback, and some refuse the uid map
+# unless particular namespaces are requested together.  Rather than encode a
+# rule, try the strongest option first and fall back, probing with the same
+# --uid 0 the real run needs.  The stubs are what the tests assert on, so a
+# sandbox that keeps the host network still tests the right things.
+namespaces=""
+for candidate in \
+    "--unshare-all" \
+    "--unshare-user --unshare-ipc --unshare-pid --unshare-uts --unshare-cgroup-try" \
+    "--unshare-user --unshare-pid" \
+    "--unshare-user-try --unshare-pid" \
+    "--unshare-user"; do
+    # shellcheck disable=SC2086
+    if bwrap $candidate --uid 0 --gid 0 \
+        --ro-bind /usr /usr --ro-bind /bin /bin \
+        --ro-bind-try /lib /lib --ro-bind-try /lib64 /lib64 \
+        /usr/bin/true >/dev/null 2>&1; then
+        namespaces=$candidate
+        break
+    fi
+done
+[ -n "$namespaces" ] || exit 127
 
 exec bwrap \
     --ro-bind /usr /usr --ro-bind /bin /bin --ro-bind /sbin /sbin \
