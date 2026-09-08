@@ -347,30 +347,175 @@ battery identity. It is the reason this driver publishes a neutral
 
 ## Installation
 
-### 0. Prerequisites
+### Quick install
+
+On the GX, as root:
+
+```sh
+wget -qO- https://raw.githubusercontent.com/vladyspavlov/dbus-deye-battery/main/install/bootstrap.sh | sh
+```
+
+That resolves the latest release, checks that the code inside really is the
+version its tag claims, works out which CAN port your battery is on, installs
+into `/data` so it survives firmware updates, and starts the service. It takes
+a few seconds and needs nothing else installed.
+
+**It does not change how your system charges or discharges.** The driver ends
+up running and publishing a battery service that nothing is consuming yet.
+Two further deliberate steps — [selecting it](#select-it-as-your-battery-monitor)
+and, only if you need it, [handing over CAN ownership](#can-keepalive-ownership-only-if-you-need-it)
+— are what give it any influence.
+
+A piped script cannot take arguments, so anything you want to set goes in the
+environment in front of it:
+
+```sh
+CAN_INTERFACE=can1 MODEL=SE-F16-C \
+  wget -qO- https://raw.githubusercontent.com/vladyspavlov/dbus-deye-battery/main/install/bootstrap.sh | sh
+```
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `VERSION` | latest release | Install an exact release instead |
+| `CAN_INTERFACE` | auto-detected | Skip detection and use this port |
+| `MODEL` | none | Variant shown in the GX device list, e.g. `SE-F12-C` |
+| `DEVICE_INSTANCE` | `513` | Change only if you run more than one pack |
+| `SERVICE_NAME` | `com.victronenergy.battery.deye_lv` | Change only if you run more than one pack |
+| `SHA256` | none | Refuse the download unless it matches this checksum |
+| `ALLOW_DOWNGRADE` | unset | Permit installing older code than is running |
+| `DRY_RUN` | unset | Print what would happen and write nothing |
+
+Settings are only seeded on a **first** install. On an upgrade your existing
+`/data/deye-virtual-battery/config` is left exactly as it is, because silently
+moving a working system onto a different CAN port or a different D-Bus identity
+is a good way to lose your battery monitor.
+
+### Reading it before you run it
+
+Piping a script from the internet into a root shell is a reasonable thing to be
+uneasy about, on a machine that controls an inverter especially. All three of
+these are supported:
+
+```sh
+# 1. Read it first, then run the copy you read.
+wget -qO bootstrap.sh https://raw.githubusercontent.com/vladyspavlov/dbus-deye-battery/main/install/bootstrap.sh
+less bootstrap.sh
+DRY_RUN=1 sh bootstrap.sh       # says what it would do, writes nothing
+sh bootstrap.sh
+
+# 2. Pin the release archive to a checksum you obtained yourself.
+VERSION=0.7.6 SHA256=<sha256 of the tarball> sh bootstrap.sh
+
+# 3. Skip the bootstrap entirely and do it by hand -- see below.
+```
+
+The script is deliberately built so that a **truncated** download does nothing
+at all: every action lives in a function, and the only line that runs anything
+is the last one. A copy that arrives half-way defines some functions and exits.
+
+### Prerequisites
 
 - Root SSH access to your GX device
   ([Victron's guide](https://www.victronenergy.com/live/ccgx:root_access)).
 - The battery wired to **BMS-Can** with a
   [correctly terminated cable](https://www.victronenergy.com/live/battery_compatibility:can-bus_bms-cable),
-  and that port set to **500 kbit/s** (`Settings → Services → BMS-Can`).
-- Confirm frames are arriving before installing anything:
+  and that port set to **CAN-bus BMS LV (500 kbit/s)** under
+  `Settings → Services`.
+- Frames actually arriving. The next section is how to prove that.
 
-  ```sh
-  candump -L -x can0 | head -20
-  ```
+### Finding your BMS-Can interface
 
-  You should see `351`, `355`, `356`, `35E` at minimum. If the interface is
-  `can1` on your GX, use that everywhere below.
+`can0` is right on most GX devices, but not on all of them. A Cerbo GX has both
+VE.Can and BMS-Can, and which kernel interface each becomes depends on the
+model and the firmware; on a GX with an added USB-CAN adapter it can be `can2`
+or higher. Installing against the wrong port gives you a service that starts,
+never qualifies, and never comes online — with nothing obviously wrong.
 
-### 1. Copy and install
-
-Install a **release**, not the `main` branch. A release is a fixed set of
-files, so the version the driver reports on D-Bus and in VRM always maps back
-to exact code — which is what you need when something misbehaves at 2am.
+The quick install works this out for you. To see its reasoning, or to check an
+existing install, run it directly:
 
 ```sh
-VERSION=0.7.5          # see the Releases page for the current one
+sh /data/deye-virtual-battery/detect-can-interface.sh
+```
+
+```text
+can0
+  link          up
+  bitrate       500000 (BMS-Can must be 500000)
+  Venus profile 3 (want 3 = CAN-bus BMS LV 500 kbit/s)
+  stock driver  can-bus-bms.can0 is running here
+  Deye frames   yes (25 frames seen while listening)
+
+Use CAN_INTERFACE=can0
+```
+
+It is read-only: it reads settings and listens, and never brings an interface
+up or down, changes a setting, or transmits a frame.
+
+It combines four independent signals, weakest first. Each is worth knowing on
+its own, because if detection fails these are what you check by hand:
+
+1. **What CAN ports exist at all.**
+
+   ```sh
+   ls /sys/class/net | grep '^can'
+   ```
+
+2. **Link state and bitrate.** BMS-Can must be up at 500 kbit/s. A port at
+   250000 is configured as VE.Can, not BMS-Can.
+
+   ```sh
+   ip -details link show can0 | grep -E 'state|bitrate'
+   ```
+
+3. **The Venus CAN-bus profile.** This is the setting behind
+   `Settings → Services → …`, and it is the authoritative answer to *what did
+   the operator configure this port as*:
+
+   ```sh
+   dbus -y com.victronenergy.settings /Settings/Canbus/can0/Profile GetValue
+   ```
+
+   `3` is **CAN-bus BMS LV (500 kbit/s)** — the one a Deye pack needs. `0` is
+   disabled; the other values are VE.Can, VE.Can + CAN-bus BMS, CAN-bus BMS HV,
+   Oceanvolt, RV-C and CANopen variants, none of which carry the frames this
+   driver decodes.
+
+4. **What Venus itself decided.** The stock driver's service is named after the
+   port it was started on, so this is Venus telling you which one it considers
+   the BMS port:
+
+   ```sh
+   ls /service | grep can-bus-bms      # e.g. can-bus-bms.can0
+   ```
+
+5. **The frames on the wire**, which beats all of the above:
+
+   ```sh
+   candump -n 20 can0
+   ```
+
+   You want `351`, `355`, `356` and `35E`. If the port is up and correctly
+   configured but silent, the problem is the cable — go back to
+   [the wiring warning](#-danger--wire-only-two-pins-and-not-straight-through),
+   because a straight-through RJ45 patch lead is the usual cause and it can
+   damage the BMS.
+
+Then pass what you found to the installer, or put it in the config afterwards:
+
+```sh
+CAN_INTERFACE=can1 wget -qO- https://raw.githubusercontent.com/vladyspavlov/dbus-deye-battery/main/install/bootstrap.sh | sh
+```
+
+### Installing by hand instead
+
+The bootstrap only automates this; there is nothing it does that you cannot do
+yourself. Install a **release**, not the `main` branch — a release is a fixed
+set of files, so the version the driver reports on D-Bus and in VRM always maps
+back to exact code, which is what you need when something misbehaves at 2am.
+
+```sh
+VERSION=0.7.6          # see the Releases page for the current one
 
 cd /data
 wget -O deye.tar.gz https://github.com/vladyspavlov/dbus-deye-battery/archive/refs/tags/v$VERSION.tar.gz
@@ -391,7 +536,14 @@ and starts the service.
 **Nothing about your system's behaviour has changed yet.** The driver is now
 publishing a battery service that nothing is consuming.
 
-### 2. Check it is healthy
+### Upgrading
+
+Exactly the same command as the quick install. It backs the current source up
+first, leaves your config alone, and refuses to go backwards unless you say
+`ALLOW_DOWNGRADE=1`. To roll back, point the source directory at one of the
+`.backup-src-*` trees the installer kept and restart the service.
+
+### Check it is healthy
 
 ```sh
 tail -F /data/log/deye-virtual-battery/current
@@ -414,7 +566,7 @@ must show **negative** `/Dc/0/Current`. Check the detected profile with
 dbus -y com.victronenergy.battery.deye_lv /Diagnostics/Profile/BmsProtocol GetValue
 ```
 
-### 3. Configure (optional)
+### Configure (optional)
 
 Edit `/data/deye-virtual-battery/config` — see
 [`install/config.example`](install/config.example) for every option. The two
@@ -427,7 +579,7 @@ MODEL=SE-F12-C           # your exact variant, shown in the GX device list
 
 Then restart: `svc -t /service/deye-virtual-battery`
 
-### 4. Select it as your battery monitor
+### Select it as your battery monitor
 
 This is the step that changes system behaviour.
 
@@ -443,7 +595,7 @@ watch your inverter for a few minutes before leaving it unattended.
 To back out: set **Controlling BMS → No BMS control** and restore your
 previous battery monitor. That is instant and needs no uninstall.
 
-### 5. CAN keepalive ownership (only if you need it)
+### CAN keepalive ownership (only if you need it)
 
 Skip this unless you are removing the stock driver. It stops
 `can-bus-bms.can0` and takes over transmitting `0x305`/`0x307`.
@@ -538,11 +690,24 @@ The current sign in `0x356` depends on the battery's selected inverter
 protocol. `Sol-ark` and `victronCAN` disagree. This driver detects which one is
 active and applies the right sign.
 
+**Which CAN interface is my battery on — can0 or can1?**
+Run `sh /data/deye-virtual-battery/detect-can-interface.sh`, or check
+`dbus -y com.victronenergy.settings /Settings/Canbus/can0/Profile GetValue`
+yourself: `3` is CAN-bus BMS LV at 500 kbit/s. See
+[Finding your BMS-Can interface](#finding-your-bms-can-interface).
+
+**Is `curl | sh` safe here?**
+You do not have to use it. The bootstrap supports `DRY_RUN=1`, takes a `SHA256`
+to pin the release archive, verifies that the tag and the packaged version
+agree before installing anything, and is written so a truncated download does
+nothing. Or install by hand — it is six commands. See
+[Reading it before you run it](#reading-it-before-you-run-it).
+
 **Do I have to remove the stock `can-bus-bms` driver?**
 Not to try it — installing changes nothing until you select it. You do need to
 hand over CAN ownership if the stock driver keeps publishing a misidentified
 service, because Venus's vendor-specific logic binds to *any* matching service,
-not just the selected one. See [step 5](#5-can-keepalive-ownership-only-if-you-need-it).
+not just the selected one. See [CAN keepalive ownership](#can-keepalive-ownership-only-if-you-need-it).
 
 **Will it work on an SE-F5-C or SE-F16-C?**
 Probably — nothing in the driver is model-specific — but nobody has confirmed

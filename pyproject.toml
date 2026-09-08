@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dbus-deye-battery"
-version = "0.7.5"
+version = "0.7.6"
 description = "Victron Venus OS battery driver for Deye SE-F LV packs over BMS-Can"
 readme = "README.md"
 license = "Apache-2.0"

@@ -44,6 +44,11 @@ done
 cp "$source_dir/install/service/log/run" "$root/service/log/run"
 chmod 755 "$root/service/log/run"
 
+# Kept beside the service so it is at a stable path however this was
+# installed, and so it is still there after the source tree is tidied away.
+cp "$source_dir/install/detect-can-interface.sh" "$root/detect-can-interface.sh"
+chmod 755 "$root/detect-can-interface.sh"
+
 if [ -f "$root/config" ]; then
     # 0.7.5 changed the default D-Bus service name from the model-specific
     # ...deye_se_f12 to the model-neutral ...deye_lv.  An install that never
@@ -78,6 +83,7 @@ echo
 echo "installed. version: $(sed -n 's/^VERSION = "\(.*\)"/\1/p' "$root/src/deye_virtual_battery/version.py")"
 echo "config:    $root/config"
 echo "logs:      tail -F /data/log/deye-virtual-battery/current"
+echo "can port:  sh $root/detect-can-interface.sh"
 echo "check:     dbus -y com.victronenergy.battery.deye_lv /Connected GetValue"
 echo
 echo "The adapter is running but NOT selected. It changes nothing until you"

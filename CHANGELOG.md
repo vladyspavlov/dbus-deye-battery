@@ -3,6 +3,56 @@
 Versions are strictly numeric: Venus OS and VRM display `/Mgmt/ProcessVersion`
 verbatim, so no suffixes or build tags appear here.
 
+## 0.7.6
+
+### Added
+- **A one-command install.** `install/bootstrap.sh`, run as
+
+  ```sh
+  wget -qO- https://raw.githubusercontent.com/vladyspavlov/dbus-deye-battery/main/install/bootstrap.sh | sh
+  ```
+
+  resolves the latest release, downloads it, verifies it, detects the CAN port
+  and installs it. `VERSION`, `CAN_INTERFACE`, `MODEL`, `DEVICE_INSTANCE`,
+  `SERVICE_NAME`, `SHA256`, `ALLOW_DOWNGRADE` and `DRY_RUN` are read from the
+  environment, because a piped script cannot take arguments. It still changes
+  no system behaviour: selecting the driver and handing over CAN ownership
+  remain separate, deliberate steps.
+
+  What it refuses to do matters as much as what it does. It will not install a
+  tag whose packaged version disagrees with it, will not install over a newer
+  version without `ALLOW_DOWNGRADE=1`, will not proceed on a failed `SHA256`,
+  and will not run anywhere that is not a GX. Every action lives in a function
+  with `main "$@"` as the last line, so a truncated download does nothing at
+  all. On an upgrade it leaves the existing config untouched, since silently
+  moving a working system to another CAN port or D-Bus identity would deselect
+  it as battery monitor.
+
+- **`install/detect-can-interface.sh`** — works out which port the battery is
+  on instead of assuming `can0`, from five signals: which `can*` interfaces
+  exist, link state and bitrate, the Venus `/Settings/Canbus/<if>/Profile`
+  setting (`3` is CAN-bus BMS LV at 500 kbit/s), which interface the stock
+  `can-bus-bms.<if>` service was started on, and finally the Deye frames
+  themselves. Read-only: it never brings an interface up or down, changes a
+  setting, or transmits. `install.sh` now leaves it at
+  `/data/deye-virtual-battery/detect-can-interface.sh`, a stable path.
+
+- **`tests/gxsim/gx-sandbox.sh`** — builds a throwaway fake Venus OS with
+  bubblewrap, with `dbus`, `candump`, `ip` and `svc` stubs answering values
+  captured from a real GX. `tests/test_installer.py` runs the real bootstrap
+  inside it and checks the fresh install, the upgrade path, the downgrade
+  refusal, a bad checksum, a mislabelled tag, the BusyBox-wget-only path, being
+  piped into a shell, and `DRY_RUN`. It also asserts the installer only ever
+  starts its own service and only ever reads from D-Bus. No inverter is
+  involved at any point. CI installs bubblewrap so these do not silently skip.
+
+### Changed
+- The README installation section leads with the one-command install, explains
+  how to read and pin the script before running it, and gains a section on
+  finding the BMS-Can interface with each check spelled out to run by hand.
+  Both are mirrored in the Ukrainian README. Numbered step headings were
+  dropped, so their anchors are now named rather than numbered.
+
 ## 0.7.5
 
 ### Changed

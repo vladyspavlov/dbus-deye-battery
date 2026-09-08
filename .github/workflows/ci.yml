@@ -21,6 +21,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev]"
+      # The installer tests build a throwaway fake Venus OS and run the real
+      # bootstrap inside it.  Without these they skip, which would quietly
+      # stop covering the one file people run as root on live hardware.
+      - run: sudo apt-get update && sudo apt-get install -y bubblewrap dash
       - run: pytest -q
 
   shellcheck:
@@ -30,8 +34,10 @@ jobs:
       - name: Check shell scripts parse
         run: |
           for f in install/install.sh install/uninstall.sh install/rc.local \
+                   install/bootstrap.sh install/detect-can-interface.sh \
                    install/service/run install/service/log/run \
                    install/service/handoff-can-owner \
-                   install/service/rollback-can-owner; do
+                   install/service/rollback-can-owner \
+                   tests/gxsim/gx-sandbox.sh; do
             sh -n "$f" && echo "ok: $f"
           done

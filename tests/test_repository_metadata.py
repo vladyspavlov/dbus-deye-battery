@@ -59,7 +59,8 @@ def test_the_install_snippet_pins_the_current_version():
     for name in READMES:
         text = (ROOT / name).read_text()
         pinned = re.findall(r"^VERSION=(\S+)", text, re.M)
-        assert pinned == [VERSION], f"{name}: {pinned}"
+        assert pinned, f"{name} has no VERSION= for a reader to install"
+        assert set(pinned) == {VERSION}, f"{name}: {pinned}"
         assert f"cd {REPOSITORY}-$VERSION" in text, name
 
 
