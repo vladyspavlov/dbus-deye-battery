@@ -756,6 +756,19 @@ No runtime dependencies. Tests run on any Linux/macOS machine — none of them
 need a GX, a CAN interface, or D-Bus. Three extended tests are skipped unless
 you drop your own recordings into `tests/data/private/`.
 
+Before pushing, run what CI runs:
+
+```sh
+sh tools/preflight.sh            # shell syntax + the full suite
+sh tools/preflight.sh --matrix   # also the oldest and newest supported
+                                 # Python, in Docker
+```
+
+The installer tests need `bubblewrap` and `dash`; without them they skip. The
+`--matrix` run is the one worth the extra minute — every CI failure this
+project has had was a difference between a developer's machine and the runner,
+not a broken test.
+
 [`docs/protocol-notes.md`](docs/protocol-notes.md) records what has been
 confirmed against the vendor's own app and protocol document, what is only
 probable, and what is still unknown.

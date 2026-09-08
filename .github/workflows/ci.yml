@@ -47,12 +47,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Check shell scripts parse
-        run: |
-          for f in install/install.sh install/uninstall.sh install/rc.local \
-                   install/bootstrap.sh install/detect-can-interface.sh \
-                   install/service/run install/service/log/run \
-                   install/service/handoff-can-owner \
-                   install/service/rollback-can-owner \
-                   tests/gxsim/gx-sandbox.sh; do
-            sh -n "$f" && echo "ok: $f"
-          done
+        # Same entry point as `sh tools/preflight.sh` locally, so the list of
+        # scripts cannot drift between here and a developer's machine.
+        run: sh tools/preflight.sh --shell

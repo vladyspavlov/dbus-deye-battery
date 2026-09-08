@@ -35,7 +35,17 @@ mkdir -p "$work/data" "$work/service" "$work/sysnet/can0" "$work/bin" \
 # extract on a real GX.
 staging=$work/staging/dbus-deye-battery-$version
 mkdir -p "$staging"
-(cd "$repo" && git ls-files --cached --others --exclude-standard) > "$work/filelist"
+if command -v git >/dev/null 2>&1 &&
+    git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; then
+    (cd "$repo" && git ls-files --cached --others --exclude-standard) > "$work/filelist"
+else
+    # No git: the tests are being run from an unpacked release, or on a
+    # stripped image.  Approximate what a release ships by dropping the caches
+    # and build droppings that a checkout would have ignored anyway.
+    (cd "$repo" && find . -type f \
+        ! -path './.git/*' ! -path '*/__pycache__/*' ! -path '*/.pytest_cache/*' \
+        ! -path '*.egg-info/*' ! -name '*.pyc' | sed 's|^\./||') > "$work/filelist"
+fi
 while IFS= read -r item; do
     [ -f "$repo/$item" ] || continue
     mkdir -p "$staging/$(dirname "$item")"
@@ -64,9 +74,15 @@ done
 : > "$work/notacommand"
 chmod 644 "$work/notacommand"
 curl_shadow=""
-# /bin is usually a symlink to /usr/bin, but both are bound separately
-# below, so both copies have to be covered.
-[ "${GX_NO_CURL:-0}" = "1" ] && curl_shadow="--ro-bind $work/notacommand /usr/bin/curl --ro-bind $work/notacommand /bin/curl"
+# /bin is usually a symlink to /usr/bin, but both are bound separately below,
+# so both copies have to be covered -- and only where the file already exists,
+# since bwrap cannot create one inside a read-only bind.
+if [ "${GX_NO_CURL:-0}" = "1" ]; then
+    for path in /usr/bin/curl /bin/curl; do
+        [ -e "$path" ] &&
+            curl_shadow="$curl_shadow --ro-bind $work/notacommand $path"
+    done
+fi
 
 cat > "$work/bin/curl" <<'STUB'
 #!/bin/sh

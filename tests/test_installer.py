@@ -156,6 +156,29 @@ def test_a_fresh_install_lands_where_it_should_and_touches_nothing_else():
 
 
 @needs_sandbox
+def test_the_suite_runs_from_an_unpacked_release_with_no_git():
+    """People run these tests from a release tarball, which has no .git."""
+    export = Path(tempfile.mkdtemp(prefix="nogit-")) / "tree"
+    shutil.copytree(
+        ROOT, export,
+        ignore=shutil.ignore_patterns(".git", "__pycache__", "*.egg-info",
+                                      ".pytest_cache"),
+    )
+    work = export.parent / "gx"
+    try:
+        done = subprocess.run(
+            [str(export / "tests/gxsim/gx-sandbox.sh"), str(work), str(export),
+             VERSION, "/usr/bin/dash", "-c",
+             "DRY_RUN=1 dash /gxsrc/install/bootstrap.sh"],
+            capture_output=True, text=True, timeout=300,
+        )
+        assert done.returncode == 0, done.stderr
+        assert "nothing was written" in done.stdout
+    finally:
+        shutil.rmtree(export.parent, ignore_errors=True)
+
+
+@needs_sandbox
 def test_the_detector_is_left_at_a_stable_path_after_installing():
     done = run_in_gx(
         "dash /gxsrc/install/bootstrap.sh >/dev/null 2>&1; "

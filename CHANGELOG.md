@@ -3,6 +3,23 @@
 Versions are strictly numeric: Venus OS and VRM display `/Mgmt/ProcessVersion`
 verbatim, so no suffixes or build tags appear here.
 
+## Unreleased
+
+### Fixed
+- The fake-GX test harness required `git` to build its fixture, so the suite
+  failed rather than skipped when run from an unpacked release — which is
+  exactly how a release gets checked. It now falls back to `find`, and a test
+  runs the harness against a copy of the tree with no `.git` to keep it that
+  way. Same for shadowing `curl` on an image that has none.
+
+### Added
+- `tools/preflight.sh` — runs what CI runs, before pushing: shell syntax for
+  every script found by its shebang (CI's own job now calls the same entry
+  point, so the list cannot drift), then the suite with
+  `GX_SANDBOX_REQUIRED=1`. `--matrix` additionally runs the suite on the
+  oldest and newest supported Python in Docker, which is where a difference
+  between a developer's machine and the runner actually shows up.
+
 ## 0.7.6
 
 ### Added
