@@ -8,7 +8,38 @@ CAN_INTERFACE=can0
 
 # D-Bus identity.  Change both only if you run more than one pack.
 SERVICE_NAME=com.victronenergy.battery.deye_lv
+
+# VRM device instance.  It must be unique among com.victronenergy.battery
+# services: it is what Settings -> System setup -> Battery monitor points at,
+# and what VRM keys this device's history on.
+#
+# 513 is a deliberate offset: the stock can-bus-bms driver takes 512 on can0.
+# That offset only holds for that one arrangement -- on a GX where BMS-Can is
+# can1 the stock driver may take 513 itself, and two packs running this driver
+# collide outright.  Leave AUTO_DEVICE_INSTANCE=1 and Venus resolves all of
+# that for you.
 DEVICE_INSTANCE=513
+
+# Ask localsettings to reserve the device instance instead of publishing
+# DEVICE_INSTANCE verbatim.  This is the mechanism Victron documents and the
+# one the stock can-bus-bms driver uses: it grants DEVICE_INSTANCE when free
+# and the next free number otherwise, then remembers the mapping.  Two packs
+# therefore get 513 and 514 with no configuration at all.
+#
+# It writes one identity mapping under /Settings/Devices and never a charge,
+# discharge, DVCC or VE.Bus setting.  An instance the system is currently
+# selecting is never moved, and an existing reservation is reused rather than
+# replaced, so this cannot deselect a working battery monitor.
+#
+# Set it to 0 if you want a guarantee that this driver writes no setting at
+# all.  install.sh sets 0 automatically when upgrading an install made before
+# this option existed.
+AUTO_DEVICE_INSTANCE=1
+
+# Identity the reservation is held under, as /Settings/Devices/<id>/... .
+# Leave empty to use the pack serial, falling back to the CAN interface name.
+# Only set this if you need a reservation to survive replacing a pack.
+DEVICE_SETTINGS_ID=
 
 # Model designation shown in the GX device list, e.g. SE-F12-C, SE-F5-C,
 # SE-F16-C.  No Deye pack transmits its model over CAN, so this cannot be

@@ -150,7 +150,7 @@ def test_any_plausible_can_interface_is_accepted(interface):
         ("--service-name", "com.victronenergy.battery."),
         ("--service-name", "com.victronenergy.battery.has space"),
         ("--device-instance", "-1"),
-        ("--device-instance", "10000"),
+        ("--device-instance", "32768"),  # VRM's own ceiling is 32767
         ("--vebus-service", "com.victronenergy.system"),
         ("--qualification-seconds", "1"),
         ("--qualification-seconds", "600"),
@@ -168,13 +168,28 @@ def test_the_published_connection_names_the_interface_actually_used():
 
 def test_a_second_pack_can_be_published_without_colliding():
     """Two batteries on one GX need distinct names and instances."""
-    _validate(
-        args(
-            "--interface", "can1",
-            "--service-name", "com.victronenergy.battery.deye_lv_b",
-            "--device-instance", "514",
-        )
+    second = args(
+        "--interface", "can1",
+        "--service-name", "com.victronenergy.battery.deye_lv_b",
+        "--device-instance", "514",
     )
+    _validate(second)
+    # Validating the argument was never enough: /DeviceInstance was published
+    # from a module constant, so both packs still announced 513.
+    from deye_virtual_battery.venus_instance import resolve_device_instance
+
+    resolution = resolve_device_instance(
+        preferred=second.device_instance, allocate=None
+    )
+    assert _fixed_paths(PolicyConfig(), resolution=resolution)["/DeviceInstance"] == 514
+
+
+def test_auto_allocation_is_off_unless_asked_for():
+    """A driver must not write to localsettings just by being started."""
+    assert args().auto_device_instance is False
+    assert args("--auto-device-instance").auto_device_instance is True
+    assert args().device_settings_id is None
+    assert args("--device-settings-id", "pack_a").device_settings_id == "pack_a"
 
 
 # --- the adapter must not be tied to one battery model -------------------

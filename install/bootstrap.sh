@@ -10,7 +10,8 @@
 #   VERSION=0.7.6        release to install; default is the latest one
 #   CAN_INTERFACE=can1   skip auto-detection of the BMS-Can port
 #   MODEL=SE-F12-C       shown in the GX device list
-#   DEVICE_INSTANCE=513  change only if you run more than one pack
+#   DEVICE_INSTANCE=513  preferred VRM instance; Venus may grant another
+#   AUTO_DEVICE_INSTANCE=0  publish DEVICE_INSTANCE verbatim, write no setting
 #   SERVICE_NAME=...     change only if you run more than one pack
 #   SHA256=<hex>         refuse the download unless it matches
 #   ALLOW_DOWNGRADE=1    permit installing older code than is running
@@ -145,6 +146,7 @@ main() {
         echo
         echo "DRY_RUN: would install $version from $source_dir into $DEST_ROOT"
         echo "DRY_RUN: CAN_INTERFACE=${interface:-can0} MODEL=${MODEL:-} DEVICE_INSTANCE=${DEVICE_INSTANCE:-513}"
+        echo "DRY_RUN: AUTO_DEVICE_INSTANCE=${AUTO_DEVICE_INSTANCE:-1}"
         echo "DRY_RUN: nothing was written."
         return 0
     fi
@@ -166,7 +168,8 @@ main() {
     # a different D-Bus identity.
     if [ "$fresh" = 1 ]; then
         for pair in "CAN_INTERFACE=${interface:-}" "MODEL=${MODEL:-}" \
-            "DEVICE_INSTANCE=${DEVICE_INSTANCE:-}" "SERVICE_NAME=${SERVICE_NAME:-}"; do
+            "DEVICE_INSTANCE=${DEVICE_INSTANCE:-}" "SERVICE_NAME=${SERVICE_NAME:-}" \
+            "AUTO_DEVICE_INSTANCE=${AUTO_DEVICE_INSTANCE:-}"; do
             key=${pair%%=*}
             value=${pair#*=}
             [ -n "$value" ] || continue

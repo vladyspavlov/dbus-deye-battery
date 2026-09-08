@@ -291,3 +291,63 @@ def test_dry_run_writes_nothing():
     assert "exit=0" in done.stdout
     assert "nothing was written" in done.stdout
     assert "deye-virtual-battery" not in done.stdout.split("---")[-1]
+
+
+# --------------------------------------------------------------------------
+# Device instance: an upgrade must never move it
+# --------------------------------------------------------------------------
+
+RUN_SCRIPT = (ROOT / "install" / "service" / "run").read_text()
+CONFIG_EXAMPLE = (ROOT / "install" / "config.example").read_text()
+INSTALL = (ROOT / "install" / "install.sh").read_text()
+
+
+def test_the_run_script_defaults_to_the_configured_instance():
+    """A config written before this option existed must not start reserving."""
+    assert re.search(r"^AUTO_DEVICE_INSTANCE=0$", RUN_SCRIPT, re.M)
+    assert "--auto-device-instance" in RUN_SCRIPT
+    assert "--device-settings-id" in RUN_SCRIPT
+
+
+def test_a_fresh_config_asks_venus_to_resolve_the_instance():
+    assert re.search(r"^AUTO_DEVICE_INSTANCE=1$", CONFIG_EXAMPLE, re.M)
+    assert re.search(r"^DEVICE_INSTANCE=513$", CONFIG_EXAMPLE, re.M)
+    # The 513 default is an offset from the stock driver, and saying so is the
+    # difference between a documented choice and a magic number.
+    assert "512" in CONFIG_EXAMPLE
+
+
+def test_the_installer_pins_the_instance_for_an_existing_install():
+    assert "AUTO_DEVICE_INSTANCE=0" in INSTALL
+    assert "AUTO_DEVICE_INSTANCE=" in INSTALL
+
+
+@needs_sandbox
+def test_an_upgrade_from_before_this_option_pins_the_instance():
+    later = "9.9.9"
+    done = run_in_gx(
+        "dash /gxsrc/install/bootstrap.sh >/dev/null 2>&1; "
+        # Reproduce a config written by an older release: no such key at all.
+        "sed -i '/AUTO_DEVICE_INSTANCE/d' /data/deye-virtual-battery/config; "
+        f"VERSION={later} dash /gxsrc/install/bootstrap.sh >/gxlog/out 2>&1; "
+        'echo "exit=$?"; '
+        'echo "---config"; cat /data/deye-virtual-battery/config',
+        GX_EXTRA_VERSIONS=later,
+    )
+    assert "exit=0" in done.stdout, done.stderr
+    config = done.stdout.split("---config")[1]
+    assert re.search(r"^AUTO_DEVICE_INSTANCE=0$", config, re.M), (
+        "an upgrade left the device instance free to move: " + config
+    )
+
+
+@needs_sandbox
+def test_a_fresh_install_leaves_instance_resolution_on():
+    done = run_in_gx(
+        "dash /gxsrc/install/bootstrap.sh >/gxlog/out 2>&1; "
+        'echo "exit=$?"; '
+        'echo "---config"; cat /data/deye-virtual-battery/config'
+    )
+    assert "exit=0" in done.stdout, done.stderr
+    config = done.stdout.split("---config")[1]
+    assert re.search(r"^AUTO_DEVICE_INSTANCE=1$", config, re.M), config

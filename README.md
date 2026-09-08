@@ -379,7 +379,8 @@ CAN_INTERFACE=can1 MODEL=SE-F16-C \
 | `VERSION` | latest release | Install an exact release instead |
 | `CAN_INTERFACE` | auto-detected | Skip detection and use this port |
 | `MODEL` | none | Variant shown in the GX device list, e.g. `SE-F12-C` |
-| `DEVICE_INSTANCE` | `513` | Change only if you run more than one pack |
+| `DEVICE_INSTANCE` | `513` | Preferred VRM instance; Venus may grant another |
+| `AUTO_DEVICE_INSTANCE` | `1` | `0` publishes `DEVICE_INSTANCE` verbatim and writes no setting |
 | `SERVICE_NAME` | `com.victronenergy.battery.deye_lv` | Change only if you run more than one pack |
 | `SHA256` | none | Refuse the download unless it matches this checksum |
 | `ALLOW_DOWNGRADE` | unset | Permit installing older code than is running |
@@ -577,7 +578,65 @@ CAN_INTERFACE=can1       # Cerbo GX often has BMS-Can on can1
 MODEL=SE-F12-C           # your exact variant, shown in the GX device list
 ```
 
+If you run more than one pack, see
+[Device instance](#device-instance-and-running-more-than-one-pack) below.
+
 Then restart: `svc -t /service/deye-virtual-battery`
+
+### Device instance, and running more than one pack
+
+Skip this unless you have two packs or a second CAN BMS. The default works.
+
+Every `com.victronenergy.battery` on a GX needs its own **VRM device
+instance**. It is what **Settings → System setup → Battery monitor** points
+at, and what VRM keys this device's history on. The default here is `513`, and
+that is not an arbitrary number: the stock `can-bus-bms` driver takes **512**
+on `can0`, so 513 sits one above it.
+
+That offset is only correct for that one arrangement. On a GX where BMS-Can is
+`can1` — the normal wiring on a Cerbo GX, and what this README recommends — the
+stock driver may take 513 itself. Two packs both running this driver collide
+outright.
+
+So by default a fresh install lets Venus resolve it, the way Victron documents
+and the way the stock driver itself behaves:
+
+```sh
+AUTO_DEVICE_INSTANCE=1     # in /data/deye-virtual-battery/config
+```
+
+The driver asks localsettings to reserve an instance under
+`/Settings/Devices/<id>/ClassAndVrmInstance`, keyed on the pack serial read
+from CAN (falling back to the interface name). localsettings grants
+`DEVICE_INSTANCE` when it is free and the next free number otherwise, then
+remembers the mapping. **Two packs therefore come up as 513 and 514 with no
+configuration at all**, and stay there across reboots and firmware updates.
+
+This is the only setting the driver ever writes, it lives under
+`/Settings/Devices`, and it is an identity mapping — never a charge, discharge,
+DVCC or VE.Bus setting. Two guards make it safe to leave on:
+
+- **An instance the system is currently selecting is never moved.** If
+  `/Settings/SystemSetup/BatteryService` already points at the configured
+  number, the driver publishes that number and does not ask localsettings
+  anything.
+- **An existing reservation is reused, never replaced.**
+
+Set `AUTO_DEVICE_INSTANCE=0` if you want a guarantee that the driver writes no
+setting whatsoever; the configured `DEVICE_INSTANCE` is then published
+verbatim. `install.sh` sets `0` automatically when it upgrades an install made
+before this option existed, so an upgrade can never move a running system's
+instance.
+
+Check what happened:
+
+```sh
+dbus -y com.victronenergy.battery.deye_lv /DeviceInstance GetValue
+dbus -y com.victronenergy.battery.deye_lv /Diagnostics/Instance/Source GetValue
+```
+
+`Source` reads `configured`, `pinned-to-selection`, `reserved`, `allocated` or
+`fallback`.
 
 ### Select it as your battery monitor
 
@@ -717,10 +776,22 @@ it on hardware. See [Compatibility](#compatibility-and-tested-scope).
 The source lives in `/data` and is restored by a `/data/rc.local` hook, which
 is Victron's own documented pattern for this.
 
+**Can I run two Deye packs on one GX?**
+Yes. Give each its own `SERVICE_NAME`, and leave `AUTO_DEVICE_INSTANCE=1` so
+Venus hands out the device instances — they come up as 513 and 514 without you
+choosing anything. See
+[Device instance](#device-instance-and-running-more-than-one-pack).
+
 **Does it write anything to my system?**
-No Venus setting, no VE.Bus mode, no DVCC parameter — ever. The only thing it
-transmits is the `0x305`/`0x307` keepalive, and only after you explicitly hand
-ownership over.
+No VE.Bus mode, no DVCC parameter, no charge or discharge setting — ever. One
+exception, and it is an identity mapping rather than a control: with
+`AUTO_DEVICE_INSTANCE=1` it reserves its VRM device instance under
+`/Settings/Devices/<id>/ClassAndVrmInstance`, which is the mechanism Victron
+documents for exactly this and what the stock `can-bus-bms` driver does. Set
+`AUTO_DEVICE_INSTANCE=0` and it writes nothing at all. Either way,
+`/Diagnostics/Commissioning/NoSettingsWrites` reports what the running process
+actually did. The only thing it transmits on CAN is the `0x305`/`0x307`
+keepalive, and only after you explicitly hand ownership over.
 
 ---
 
@@ -733,6 +804,7 @@ cache                per-field freshness, so a stale field is never used
 policy               limits, alarms, permissions from a snapshot
 stateful             debounce, hysteresis, lifecycle
 dbus_model           shape it as D-Bus paths (no D-Bus dependency)
+venus_instance       decide the VRM device instance (pure; no D-Bus)
 venus_bms_publisher  the only layer that touches D-Bus or a CAN socket
 ```
 

@@ -135,12 +135,13 @@ def _add_paths(
     initial: dict[str, Any],
     *,
     duration_seconds: float,
+    device_instance: int = DEVICE_INSTANCE,
 ) -> set[str]:
     fixed = {
         "/Mgmt/ProcessName": __file__,
         "/Mgmt/ProcessVersion": f"{VERSION}-stage",
         "/Mgmt/Connection": "passive SocketCAN can0 (no-control stage)",
-        "/DeviceInstance": DEVICE_INSTANCE,
+        "/DeviceInstance": device_instance,
         "/ProductId": 0xFFFF,
         "/ProductName": "Deye LV battery",
         "/CustomName": "Deye LV battery (staged; do not select)",
@@ -218,6 +219,7 @@ def run(arguments: argparse.Namespace) -> int:
             service,
             core.last_model["paths"],
             duration_seconds=arguments.duration_seconds,
+            device_instance=arguments.device_instance,
         )
         main_loop = GLib.MainLoop()
         started = time.monotonic()

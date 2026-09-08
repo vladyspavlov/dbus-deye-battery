@@ -168,3 +168,97 @@ def test_commissioning_service_is_neutral_selectable_and_keeps_deye_limits():
     assert "/Diagnostics/Commissioning/Selected" in dynamic
     assert "/Diagnostics/Publisher/Heartbeat" in dynamic
     assert "/UpdateIndex" in dynamic
+
+
+class RecordingService:
+    def __init__(self):
+        self.paths = {}
+
+    def add_path(self, path, value):
+        self.paths[path] = value
+
+
+def published_model():
+    core = VenusPublisherCore()
+    apply_cycle(core, 1000.0)
+    core.step(timestamp=1000.2, vebus_voltage_v=53.3)
+    apply_cycle(core, 1002.2)
+    return core.step(timestamp=1002.3, vebus_voltage_v=53.3)
+
+
+def test_the_published_device_instance_follows_the_resolution():
+    """It used to be a module constant, so --device-instance was ignored.
+
+    Two packs configured with different instances both published 513, which is
+    precisely the collision the option exists to avoid.
+    """
+    from deye_virtual_battery.venus_instance import resolve_device_instance
+
+    model = published_model()
+
+    service = RecordingService()
+    _add_bms_paths(service, model["paths"], config=PolicyConfig())
+    assert service.paths["/DeviceInstance"] == 513
+    assert service.paths["/Diagnostics/Instance/Source"] == "configured"
+    assert service.paths["/Diagnostics/Instance/SettingsId"] == ""
+    assert service.paths["/Diagnostics/Instance/Requested"] == 513
+
+    moved = RecordingService()
+    resolution = resolve_device_instance(
+        preferred=513,
+        candidates=["deye_second"],
+        read_reservation=lambda _: None,
+        allocate=lambda settings_id, preferred: "battery:514",
+    )
+    _add_bms_paths(moved, model["paths"], config=PolicyConfig(), resolution=resolution)
+    assert moved.paths["/DeviceInstance"] == 514
+    assert moved.paths["/Diagnostics/Instance/Source"] == "allocated"
+    assert moved.paths["/Diagnostics/Instance/SettingsId"] == "deye_second"
+    assert moved.paths["/Diagnostics/Instance/Requested"] == 513
+
+
+def test_no_settings_writes_reports_what_the_run_actually_did():
+    """The claim is about this process, so it has to track the reservation."""
+    from deye_virtual_battery.venus_instance import resolve_device_instance
+
+    model = published_model()
+
+    for resolution, expected in (
+        (None, 1),
+        (resolve_device_instance(preferred=513, allocate=None), 1),
+        (
+            resolve_device_instance(
+                preferred=513,
+                candidates=["deye_x"],
+                read_reservation=lambda _: "battery:520",
+                allocate=lambda *_: "battery:999",
+            ),
+            1,
+        ),
+        (
+            resolve_device_instance(
+                preferred=513,
+                candidates=["deye_x"],
+                read_reservation=lambda _: None,
+                allocate=lambda *_: "battery:514",
+            ),
+            0,
+        ),
+    ):
+        service = RecordingService()
+        _add_bms_paths(
+            service, model["paths"], config=PolicyConfig(), resolution=resolution
+        )
+        assert (
+            service.paths["/Diagnostics/Commissioning/NoSettingsWrites"] == expected
+        ), resolution
+        # Whatever happens to the instance, the driver still never writes a
+        # VE.Bus mode or transmits on CAN without being armed.
+        assert service.paths["/Diagnostics/Commissioning/NoVebusModeWrites"] == 1
+
+
+def test_the_staged_service_also_honours_its_configured_instance():
+    model = published_model()
+    service = RecordingService()
+    _add_paths(service, model["paths"], duration_seconds=120.0, device_instance=520)
+    assert service.paths["/DeviceInstance"] == 520

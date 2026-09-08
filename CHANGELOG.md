@@ -6,6 +6,11 @@ verbatim, so no suffixes or build tags appear here.
 ## Unreleased
 
 ### Fixed
+- **`--device-instance` was ignored.** `/DeviceInstance` was published from a
+  module constant, so two packs configured with different instances both
+  announced 513 — exactly the collision the option exists to prevent. The
+  staged publisher had the same bug. The argument is now honoured, and the
+  accepted range is VRM's own 0–32767 rather than 0–9999.
 - The fake-GX test harness required `git` to build its fixture, so the suite
   failed rather than skipped when run from an unpacked release — which is
   exactly how a release gets checked. It now falls back to `find`, and a test
@@ -13,6 +18,33 @@ verbatim, so no suffixes or build tags appear here.
   way. Same for shadowing `curl` on an image that has none.
 
 ### Added
+- **Venus resolves the device instance.** A VRM device instance has to be
+  unique per device class, and 513 was only ever safe against one arrangement:
+  the stock `can-bus-bms` driver takes 512 on `can0`. Where BMS-Can is `can1`
+  the stock driver may take 513 itself, and two packs running this driver
+  collided outright.
+
+  With `AUTO_DEVICE_INSTANCE=1` — the default for a fresh install — the driver
+  reserves its instance through localsettings at
+  `/Settings/Devices/<id>/ClassAndVrmInstance`, keyed on the pack serial and
+  falling back to the interface name. That is the mechanism Victron documents
+  and what the stock driver itself does. Two packs come up as 513 and 514 with
+  no configuration.
+
+  It is guarded, because moving `/DeviceInstance` deselects the battery
+  monitor and splits VRM history. An instance the system currently selects is
+  never moved — localsettings is not even asked. An existing reservation is
+  reused rather than replaced. Every failure falls back to the configured
+  number. `install.sh` writes `AUTO_DEVICE_INSTANCE=0` when upgrading an
+  install made before the option existed, the same way it already pins
+  `SERVICE_NAME`.
+
+  New diagnostics say what happened: `/Diagnostics/Instance/Source`
+  (`configured`, `pinned-to-selection`, `reserved`, `allocated`, `fallback`),
+  `/Diagnostics/Instance/SettingsId` and `/Diagnostics/Instance/Requested`.
+  `/Diagnostics/Commissioning/NoSettingsWrites` now reports what the running
+  process actually did rather than a constant `1`.
+
 - `tools/preflight.sh` — runs what CI runs, before pushing: shell syntax for
   every script found by its shebang (CI's own job now calls the same entry
   point, so the list cannot drift), then the suite with

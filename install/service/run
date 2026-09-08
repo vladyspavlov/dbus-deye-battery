@@ -7,6 +7,10 @@ root=/data/deye-virtual-battery
 CAN_INTERFACE=can0
 SERVICE_NAME=com.victronenergy.battery.deye_lv
 DEVICE_INSTANCE=513
+# Off unless the config says otherwise, so an upgrade of an install that
+# predates this option can never move its device instance.
+AUTO_DEVICE_INSTANCE=0
+DEVICE_SETTINGS_ID=
 MODEL=
 CELL_COUNT=
 VEBUS_SERVICE=
@@ -23,6 +27,8 @@ set -- \
     --qualification-seconds "$QUALIFICATION_SECONDS" \
     --log-level "$LOG_LEVEL"
 
+[ "$AUTO_DEVICE_INSTANCE" = "1" ] && set -- "$@" --auto-device-instance
+[ -n "$DEVICE_SETTINGS_ID" ] && set -- "$@" --device-settings-id "$DEVICE_SETTINGS_ID"
 [ -n "$VEBUS_SERVICE" ] && set -- "$@" --vebus-service "$VEBUS_SERVICE"
 [ -n "$MODEL" ] && set -- "$@" --model "$MODEL"
 [ -n "$CELL_COUNT" ] && set -- "$@" --cell-count "$CELL_COUNT"

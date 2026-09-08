@@ -59,6 +59,15 @@ if [ -f "$root/config" ]; then
         echo "pinning the pre-0.7.5 D-Bus service name in $root/config"
         echo "SERVICE_NAME=com.victronenergy.battery.deye_se_f12" >> "$root/config"
     fi
+    # Same reasoning for the VRM device instance.  A running system's
+    # /Settings/SystemSetup/BatteryService points at the number this driver
+    # publishes, so an upgrade must not start resolving it a different way.
+    # The driver refuses to move an instance the system selects, but pinning
+    # here means the question is never asked at all.
+    if ! grep -q '^[[:space:]]*AUTO_DEVICE_INSTANCE=' "$root/config"; then
+        echo "pinning the configured device instance in $root/config"
+        echo "AUTO_DEVICE_INSTANCE=0" >> "$root/config"
+    fi
 else
     cp "$source_dir/install/config.example" "$root/config"
 fi

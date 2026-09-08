@@ -31,6 +31,16 @@ from typing import Any, Callable
 from .can_keepalive import KeepaliveSnapshot, KeepaliveTransmitter
 from .policy import PolicyConfig
 from .venus_discovery import VebusLocator, read_vebus_voltage
+from .venus_instance import (
+    BATTERY_SERVICE_SETTING,
+    MAX_DEVICE_INSTANCE,
+    InstanceResolution,
+    make_reservation_reader,
+    make_settings_allocator,
+    resolve_device_instance,
+    selected_battery_instance,
+    settings_id_candidates,
+)
 from .venus_runtime import (
     CAN_FRAME_SIZE,
     RuntimeClock,
@@ -74,6 +84,15 @@ def _read_number(bus: Any, service_name: str, path: str) -> float | None:
 def _read_bms_instance(bus: Any) -> int | None:
     value = _read_number(bus, "com.victronenergy.settings", BMS_INSTANCE_PATH)
     return int(value) if value is not None else None
+
+
+def _read_selected_battery_instance(bus: Any) -> int | None:
+    """Which battery instance the system currently selects, if any."""
+    try:
+        raw = _get_value(bus, "com.victronenergy.settings", BATTERY_SERVICE_SETTING)
+    except Exception:
+        return None
+    return selected_battery_instance(raw)
 
 
 def _read_vebus_voltage(bus: Any, locator: VebusLocator) -> float | None:
@@ -186,6 +205,26 @@ def _hardware_version(config: PolicyConfig, model: str | None) -> str:
     return f"{model} {series}".strip()
 
 
+def _instance_paths(resolution: InstanceResolution | None) -> dict[str, Any]:
+    """Say plainly where the published device instance came from.
+
+    An operator debugging a battery that stopped being selected needs to know
+    whether this driver took the configured number, reused a reservation, or
+    was handed a different one by localsettings.
+    """
+    if resolution is None:
+        return {
+            "/Diagnostics/Instance/Source": "configured",
+            "/Diagnostics/Instance/SettingsId": "",
+            "/Diagnostics/Instance/Requested": DEVICE_INSTANCE,
+        }
+    return {
+        "/Diagnostics/Instance/Source": resolution.source,
+        "/Diagnostics/Instance/SettingsId": resolution.settings_id,
+        "/Diagnostics/Instance/Requested": resolution.requested,
+    }
+
+
 def _fixed_paths(
     config: PolicyConfig,
     *,
@@ -193,14 +232,16 @@ def _fixed_paths(
     interface: str = "can0",
     serial: str | None = None,
     model: str | None = None,
+    resolution: InstanceResolution | None = None,
 ) -> dict[str, Any]:
+    instance = DEVICE_INSTANCE if resolution is None else resolution.instance
     return {
         "/Mgmt/ProcessName": __file__,
         "/Mgmt/ProcessVersion": PROCESS_VERSION,
         "/Mgmt/Connection": (
             f"SocketCAN {interface}; guarded Deye keepalive ownership"
         ),
-        "/DeviceInstance": DEVICE_INSTANCE,
+        "/DeviceInstance": instance,
         "/ProductId": PRODUCT_ID,
         # Nothing here is tied to one model.  Capacity and series count come
         # off the wire; the model name does not appear in the protocol at all,
@@ -218,7 +259,13 @@ def _fixed_paths(
         "/Capabilities/ChargeVoltageControl": 0,
         "/Diagnostics/Commissioning/Selectable": 1,
         "/Diagnostics/Commissioning/NoCanTransmit": int(not can_tx_enabled),
-        "/Diagnostics/Commissioning/NoSettingsWrites": 1,
+        # Reporting what this run did, not what the project aspires to: the
+        # optional instance reservation is the one localsettings write this
+        # driver can make, and it is an identity mapping, never a control
+        # setting.
+        "/Diagnostics/Commissioning/NoSettingsWrites": int(
+            resolution is None or not resolution.attempted_settings_write
+        ),
         "/Diagnostics/Commissioning/NoVebusModeWrites": 1,
         "/Diagnostics/CanTx/FeatureEnabled": int(can_tx_enabled),
         "/Diagnostics/CanTx/ArmFile": "/run/deye-virtual-battery/tx-armed",
@@ -230,6 +277,7 @@ def _fixed_paths(
         "/Diagnostics/Safety/BlockedChargeVoltage": config.blocked_charge_cvl_v,
         "/Diagnostics/Safety/AlarmFlagsControlLimits": 0,
         "/Diagnostics/Profile/Supported": "deye_native,victron_can",
+        **_instance_paths(resolution),
     }
 
 
@@ -243,6 +291,7 @@ def _add_paths(
     interface: str = "can0",
     serial: str | None = None,
     model: str | None = None,
+    resolution: InstanceResolution | None = None,
 ) -> set[str]:
     fixed = _fixed_paths(
         config,
@@ -250,6 +299,7 @@ def _add_paths(
         interface=interface,
         serial=serial,
         model=model,
+        resolution=resolution,
     )
     for path, value in fixed.items():
         service.add_path(path, value)
@@ -301,7 +351,8 @@ def _validate(arguments: argparse.Namespace) -> None:
     suffix = arguments.service_name[len(BATTERY_SERVICE_PREFIX):]
     if not suffix or not all(part.isidentifier() for part in suffix.split(".")):
         raise ValueError(f"invalid D-Bus service suffix: {suffix!r}")
-    if not 0 <= arguments.device_instance <= 9999:
+    # 32767 is VRM's own ceiling for the field, per Victron's D-Bus API doc.
+    if not 0 <= arguments.device_instance <= MAX_DEVICE_INSTANCE:
         raise ValueError(
             f"device instance out of range: {arguments.device_instance}"
         )
@@ -317,6 +368,58 @@ def _validate(arguments: argparse.Namespace) -> None:
         15.0 <= arguments.duration_seconds <= 600.0
     ):
         raise ValueError("duration must be between 15 and 600 seconds")
+
+
+def _resolve_instance(
+    bus: Any,
+    arguments: argparse.Namespace,
+    *,
+    serial: str | None,
+    settings_device_factory: Callable[..., Any] | None = None,
+) -> InstanceResolution:
+    """Pick the device instance to publish, and say so in the log.
+
+    With --auto-device-instance the driver asks localsettings to reserve one,
+    which is how Victron documents it and how the stock can-bus-bms driver
+    behaves.  Without it, the configured number is published unchanged and
+    nothing is written.
+    """
+    allocate = None
+    if getattr(arguments, "auto_device_instance", False):
+        if settings_device_factory is None:
+            from settingsdevice import SettingsDevice
+
+            settings_device_factory = SettingsDevice
+        allocate = make_settings_allocator(bus, settings_device_factory)
+
+    resolution = resolve_device_instance(
+        preferred=arguments.device_instance,
+        candidates=settings_id_candidates(
+            explicit=getattr(arguments, "device_settings_id", None),
+            serial=serial,
+            interface=arguments.interface,
+        ),
+        read_reservation=make_reservation_reader(
+            lambda service, path: _get_value(bus, service, path)
+        ),
+        allocate=allocate,
+        selected_instance=_read_selected_battery_instance(bus),
+    )
+    logging.info(
+        "device instance %s (%s): %s",
+        resolution.instance,
+        resolution.source,
+        resolution.detail,
+    )
+    if resolution.moved:
+        logging.warning(
+            "device instance moved from the configured %s to %s; if this "
+            "adapter was selected as battery monitor, re-select it under "
+            "Settings -> System setup",
+            resolution.requested,
+            resolution.instance,
+        )
+    return resolution
 
 
 def run(arguments: argparse.Namespace) -> int:
@@ -369,6 +472,9 @@ def run(arguments: argparse.Namespace) -> int:
             config.cell_count,
             "measured" if config.cell_count_detected else "assumed",
         )
+        serial = core.last_model["paths"].get("/Serial")
+        resolution = _resolve_instance(bus, arguments, serial=serial)
+        config = replace(config, device_instance=resolution.instance)
         service = VeDbusService(arguments.service_name, register=False)
         dynamic_paths = _add_paths(
             service,
@@ -377,8 +483,9 @@ def run(arguments: argparse.Namespace) -> int:
             can_tx_enabled=arguments.allow_can_transmit,
             transmitter_snapshot=transmitter.snapshot(),
             interface=arguments.interface,
-            serial=core.last_model["paths"].get("/Serial"),
+            serial=serial,
             model=arguments.model,
+            resolution=resolution,
         )
         service.register()
         main_loop = GLib.MainLoop()
@@ -401,7 +508,7 @@ def run(arguments: argparse.Namespace) -> int:
                     raise RuntimeError(
                         "BmsInstance changed during unselected discovery"
                     )
-                selected = int(bms_instance == arguments.device_instance)
+                selected = int(bms_instance == resolution.instance)
                 tx_values = _tx_values(transmitter.snapshot())
                 heartbeat += 1
                 update_index = (update_index + 1) % 256
@@ -480,6 +587,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--qualification-seconds", type=float, default=10.0)
     parser.add_argument("--duration-seconds", type=float)
     parser.add_argument("--require-no-bms-control", action="store_true")
+    parser.add_argument(
+        "--auto-device-instance",
+        action="store_true",
+        help="reserve the VRM device instance through localsettings instead "
+        "of publishing --device-instance verbatim, so two packs and the stock "
+        "CAN BMS driver cannot collide. Writes one identity mapping under "
+        "/Settings/Devices and never a control setting. An instance the "
+        "system currently selects is never moved.",
+    )
+    parser.add_argument(
+        "--device-settings-id",
+        default=None,
+        help="identity to hold the reservation under. Defaults to the pack "
+        "serial, then the CAN interface name.",
+    )
     parser.add_argument("--allow-can-transmit", action="store_true")
     parser.add_argument(
         "--model",
