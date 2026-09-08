@@ -232,6 +232,60 @@ def test_pack_thresholds_scale_with_the_measured_series_count():
     assert eight.pack_overvoltage_protection_v == 29.2
 
 
+def test_an_unevenly_spread_pack_is_still_measured():
+    """The reference 16s pack, from a real capture. It used to fall back.
+
+    Cells at 3.352 and 3.524 with the pack at 54.5 V: the mean of the two
+    extremes is 3.438, so 16 x 3.438 overshoots the pack by 0.51 V and the old
+    fixed-residual check rejected the correct answer. The per-cell voltage the
+    count implies is what has to be inside the measured bracket, and 3.406 is.
+    """
+    from deye_virtual_battery.policy import PolicyConfig, detect_cell_count
+
+    real = {
+        "battery.voltage": {"effective_value": 54.5},
+        "cells.max_voltage_200": {"effective_value": 3.524},
+        "cells.min_voltage_200": {"effective_value": 3.352},
+    }
+    assert detect_cell_count(real, 0) == (16, True)
+
+    # And the thresholds it produces are the ones the live system runs on.
+    config = PolicyConfig().for_pack(real)
+    assert config.cell_count == 16 and config.cell_count_detected
+    assert round(config.normal_max_voltage_v, 3) == 57.6
+    assert round(config.pack_overvoltage_protection_v, 3) == 58.4
+    assert round(config.provisional_charge_ceiling_v, 3) == 57.2
+    assert round(config.blocked_charge_cvl_v, 3) == 55.2
+
+
+def test_a_count_the_cells_cannot_explain_is_rejected():
+    """The bracket is the check: a mean cannot fall outside its own extremes.
+
+    Note what this does and does not catch. It vetoes a pack voltage that the
+    reported cells cannot account for at any count in range. It cannot catch a
+    stale pack voltage that happens to be consistent with a different count --
+    nothing available on the wire can, and the fallback is the same 16 either
+    way.
+    """
+    from deye_virtual_battery.policy import detect_cell_count
+
+    def reading(pack, maximum, minimum):
+        return {
+            "battery.voltage": {"effective_value": pack},
+            "cells.max_voltage_200": {"effective_value": maximum},
+            "cells.min_voltage_200": {"effective_value": minimum},
+        }
+
+    # Tightly matched cells at 3.40-3.41. 50.0 V rounds to 15s, but 15 cells of
+    # 3.333 V contradicts a measured minimum of 3.40, so it is refused.
+    assert detect_cell_count(reading(50.0, 3.41, 3.40), 16) == (16, False)
+    # The same cells at a pack voltage they do explain.
+    assert detect_cell_count(reading(54.5, 3.41, 3.40), 0) == (16, True)
+
+    # A pack voltage no count in range can explain from these cells.
+    assert detect_cell_count(reading(6.0, 3.41, 3.40), 16) == (16, False)
+
+
 def test_an_unmeasurable_pack_falls_back_and_says_so():
     """Guessing a series count would put the CVL on the wrong pack."""
     from deye_virtual_battery.policy import PolicyConfig, detect_cell_count
@@ -240,6 +294,11 @@ def test_an_unmeasurable_pack_falls_back_and_says_so():
         {},
         {"battery.voltage": {"effective_value": 53.3}},                      # no cells
         cells(53.3, 3.90),                                                   # inconsistent
+        {                                                                    # max < min
+            "battery.voltage": {"effective_value": 53.3},
+            "cells.max_voltage_200": {"effective_value": 3.20},
+            "cells.min_voltage_200": {"effective_value": 3.40},
+        },
         cells(53.3, 0.0),                                                    # zero cells
         cells(200.0, 3.30),                                                  # 60s, out of range
     ):

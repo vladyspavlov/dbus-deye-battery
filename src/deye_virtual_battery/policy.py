@@ -223,10 +223,14 @@ def required_control_fields(
 
 # A series count is only believable if the pack voltage really is that many
 # cells of the measured size.  Anything outside this range, or that fails the
-# residual check, means the reading is not trustworthy and the fallback is used.
+# consistency check, means the reading is not trustworthy and the fallback is
+# used.
 MINIMUM_CELL_COUNT = 4
 MAXIMUM_CELL_COUNT = 32
-CELL_COUNT_TOLERANCE_V = 0.25
+# Slack on the min/max cell bracket, absorbing BMS rounding (cell voltages are
+# reported in millivolts, pack voltage in tens of millivolts) and the small
+# IR-drop difference between the pack sense point and the cell taps.
+CELL_BRACKET_MARGIN_V = 0.05
 
 
 def detect_cell_count(fields: dict[str, Any], fallback: int) -> tuple[int, bool]:
@@ -240,22 +244,37 @@ def detect_cell_count(fields: dict[str, Any], fallback: int) -> tuple[int, bool]
     Returns ``(count, detected)``.  ``detected`` is False when the inputs are
     missing or do not agree, in which case the caller's fallback is used and
     the adapter says so rather than pretending it measured something.
+
+    The count is only accepted if the per-cell voltage it implies actually
+    lies between the reported minimum and maximum cell.  That has to be true
+    of the real count -- a mean cannot fall outside its own extremes -- and it
+    is what makes the answer trustworthy: a partially stale snapshot pairing
+    one frame's pack voltage with another's cell voltages lands outside the
+    bracket, and so does every neighbouring count.
+
+    An earlier version compared the count against a fixed 0.25 V residual from
+    the mean of the two extremes.  That mean is a biased estimator whenever the
+    cells are unevenly spread, and on the reference 16s pack -- 54.5 V with
+    cells at 3.352 and 3.524 -- the bias is 0.51 V, so the correct count was
+    rejected and every pack fell back to the assumed 16.
     """
     pack_voltage = _number(fields, "battery.voltage")
     maximum = _maximum_effective(fields, ("cells.max_voltage_200", "cells.max_voltage_361"))
     minimum = _minimum_effective(fields, ("cells.min_voltage_200", "cells.min_voltage_361"))
     if pack_voltage is None or maximum is None or minimum is None:
         return fallback, False
-    mean_cell = (maximum + minimum) / 2.0
-    if mean_cell <= 0.5:
+    if minimum <= 0.5 or maximum < minimum:
         return fallback, False
-    estimate = pack_voltage / mean_cell
-    count = int(round(estimate))
+    mean_cell = (maximum + minimum) / 2.0
+    count = int(round(pack_voltage / mean_cell))
     if not MINIMUM_CELL_COUNT <= count <= MAXIMUM_CELL_COUNT:
         return fallback, False
-    # Reject a count that does not reconstruct the measured pack voltage: a
-    # partially stale snapshot can otherwise produce a plausible-looking integer.
-    if abs(count * mean_cell - pack_voltage) > CELL_COUNT_TOLERANCE_V:
+    implied_cell = pack_voltage / count
+    if not (
+        minimum - CELL_BRACKET_MARGIN_V
+        <= implied_cell
+        <= maximum + CELL_BRACKET_MARGIN_V
+    ):
         return fallback, False
     return count, True
 

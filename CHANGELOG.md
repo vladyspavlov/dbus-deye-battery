@@ -6,6 +6,19 @@ verbatim, so no suffixes or build tags appear here.
 ## 0.7.7
 
 ### Fixed
+- **The series cell count was never actually measured on a real pack.** The
+  count was accepted only if it reconstructed the pack voltage to within a
+  fixed 0.25 V of the mean of the two extreme cells — but that mean is a
+  biased estimator whenever the cells are unevenly spread. On the reference
+  16s pack (54.5 V, cells at 3.352 and 3.524) the bias is 0.51 V, so the
+  correct count was rejected and every pack quietly fell back to the assumed
+  16. The check is now that the per-cell voltage the count implies lies inside
+  the measured min/max bracket, which is true of the real count by definition
+  and which the neighbouring counts fail.
+
+  No threshold moves on a 16s pack — 57.6 / 58.4 / 57.2 / 55.2 either way —
+  but a pack that is not 16s now gets its own thresholds instead of a 16s
+  pack's.
 - **`--device-instance` was ignored.** `/DeviceInstance` was published from a
   module constant, so two packs configured with different instances both
   announced 513 — exactly the collision the option exists to prevent. The
