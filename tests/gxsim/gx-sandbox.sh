@@ -202,7 +202,10 @@ echo "${GX_LATEST_VERSION:-$version}" > "$work/log/latest"
 # download stubs are what the tests assert on either way.
 namespaces="--unshare-all"
 if ! bwrap --unshare-all --ro-bind /usr /usr /usr/bin/true >/dev/null 2>&1; then
-    namespaces="--unshare-user --unshare-ipc --unshare-pid --unshare-uts"
+    # Exactly what --unshare-all does, minus the network.  The -try forms
+    # matter: where bwrap is setuid rather than using an unprivileged user
+    # namespace, a hard --unshare-user cannot set up the uid map.
+    namespaces="--unshare-user-try --unshare-ipc --unshare-pid --unshare-uts --unshare-cgroup-try"
 fi
 
 exec bwrap \
