@@ -46,6 +46,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        # The version check reads the tags, and the history between the newest
+        # tag and HEAD. A shallow tagless clone -- the default -- can see
+        # neither, so it would report every released version as untagged.
+        with:
+          fetch-depth: 0
       # The package version, pyproject and the changelog heading must agree
       # before a tag is ever cut, because the release workflow builds its
       # notes from the changelog and refuses a tag that disagrees with the
