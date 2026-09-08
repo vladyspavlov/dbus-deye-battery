@@ -417,7 +417,7 @@ is the last one. A copy that arrives half-way defines some functions and exits.
 ### Prerequisites
 
 - Root SSH access to your GX device
-  ([Victron's guide](https://www.victronenergy.com/live/ccgx:root_access)).
+  ([Victron's guide](https://www.victronenergy.com/live/ccgx:root_access#how_to_obtain_root_access)).
 - The battery wired to **BMS-Can** with a
   [correctly terminated cable](https://www.victronenergy.com/live/battery_compatibility:can-bus_bms-cable),
   and that port set to **CAN-bus BMS LV (500 kbit/s)** under

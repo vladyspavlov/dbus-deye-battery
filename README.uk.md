@@ -419,7 +419,7 @@ VERSION=0.7.7 SHA256=<sha256 архіву> sh bootstrap.sh
 ### Передумови
 
 - Root-доступ по SSH до вашого пристрою GX
-  ([посібник Victron](https://www.victronenergy.com/live/ccgx:root_access)).
+  ([посібник Victron](https://www.victronenergy.com/live/ccgx:root_access#how_to_obtain_root_access)).
 - Батарея під’єднана до **BMS-Can**
   [правильно термінованим кабелем](https://www.victronenergy.com/live/battery_compatibility:can-bus_bms-cable),
   і цей порт налаштовано на **CAN-bus BMS LV (500 кбіт/с)** у
