@@ -23,8 +23,23 @@ jobs:
       - run: pip install -e ".[dev]"
       # The installer tests build a throwaway fake Venus OS and run the real
       # bootstrap inside it.  Without these they skip, which would quietly
-      # stop covering the one file people run as root on live hardware.
-      - run: sudo apt-get update && sudo apt-get install -y bubblewrap dash
+      # stop covering the one file people run as root on live hardware, so
+      # GX_SANDBOX_REQUIRED below turns a skip into a failure.
+      - name: Install the sandbox the installer tests run in
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap dash
+          # Ubuntu 24.04 restricts unprivileged user namespaces by default,
+          # which is what the sandbox is built out of.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          echo "--- what this host will grant"
+          for c in "--unshare-all" \
+                   "--unshare-user --unshare-ipc --unshare-pid --unshare-uts" \
+                   "--unshare-user --unshare-pid" "--unshare-user"; do
+            if bwrap $c --uid 0 --gid 0 --ro-bind /usr /usr --ro-bind /bin /bin \
+               --ro-bind-try /lib /lib --ro-bind-try /lib64 /lib64 \
+               /usr/bin/true 2>/dev/null; then echo "ok:   $c"; else echo "no:   $c"; fi
+          done
       - run: GX_SANDBOX_REQUIRED=1 pytest -q
 
   shellcheck:
