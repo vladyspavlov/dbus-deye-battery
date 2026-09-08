@@ -841,6 +841,24 @@ The installer tests need `bubblewrap` and `dash`; without them they skip. The
 project has had was a difference between a developer's machine and the runner,
 not a broken test.
 
+### Releasing
+
+`VERSION` in `src/deye_virtual_battery/version.py` is the only place the
+version is authored. `pyproject.toml` and the newest `CHANGELOG.md` heading
+must agree with it — CI fails if they do not — and the tag is cut from the
+code rather than from an argument, so it cannot name something other than what
+it ships:
+
+```sh
+sh tools/release.sh --dry-run   # every check, nothing pushed
+sh tools/release.sh             # tag and push
+```
+
+Pushing the tag is the entire release. The workflow re-checks the version,
+runs the suite against the tagged tree, and publishes that version's changelog
+section as the release notes. A version that is never tagged reaches nobody,
+so `sh tools/preflight.sh --version` says so out loud.
+
 [`docs/protocol-notes.md`](docs/protocol-notes.md) records what has been
 confirmed against the vendor's own app and protocol document, what is only
 probable, and what is still unknown.

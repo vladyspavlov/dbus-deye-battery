@@ -42,10 +42,16 @@ jobs:
           done
       - run: GX_SANDBOX_REQUIRED=1 pytest -q
 
-  shellcheck:
+  static:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # The package version, pyproject and the changelog heading must agree
+      # before a tag is ever cut, because the release workflow builds its
+      # notes from the changelog and refuses a tag that disagrees with the
+      # code.  Catching it here means the release commit is already coherent.
+      - name: Check the version agrees with itself
+        run: sh tools/preflight.sh --version
       - name: Check shell scripts parse
         # Same entry point as `sh tools/preflight.sh` locally, so the list of
         # scripts cannot drift between here and a developer's machine.

@@ -1,8 +1,9 @@
 #!/bin/sh
 # Run what CI runs, before pushing.
 #
-#   sh tools/preflight.sh            shell syntax + the test suite
+#   sh tools/preflight.sh            version + shell syntax + the test suite
 #   sh tools/preflight.sh --shell    shell syntax only (what CI's job calls)
+#   sh tools/preflight.sh --version  version consistency only (ditto)
 #   sh tools/preflight.sh --tests    the test suite only
 #   sh tools/preflight.sh --matrix   also run the suite on the oldest and
 #                                    newest supported Python, in Docker
@@ -29,6 +30,48 @@ check_shell() {
         found=$((found + 1))
     done
     [ "$found" -gt 0 ] || { echo "no shell scripts found -- wrong root?" >&2; exit 1; }
+}
+
+# One version number lives in four places and a release is only coherent when
+# all four agree: the packaged VERSION, the pyproject metadata, the changelog
+# heading people read, and the git tag the release workflow builds from. The
+# workflow already refuses a tag that disagrees with the code -- but that fires
+# only once the tag is pushed, and 0.7.7 shipped in the code, the changelog and
+# pyproject while the newest release on GitHub still said 0.7.6. Nothing was
+# wrong; the tag had simply never been cut. This is the check that says so.
+check_version() {
+    echo "== version"
+    packaged=$(sed -n 's/^VERSION = "\(.*\)"$/\1/p' \
+        "$root/src/deye_virtual_battery/version.py")
+    project=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$root/pyproject.toml")
+    logged=$(sed -n 's/^## \([0-9][0-9.]*\)[[:space:]]*$/\1/p' \
+        "$root/CHANGELOG.md" | head -n 1)
+
+    [ -n "$packaged" ] || { echo "  version.py has no VERSION" >&2; exit 1; }
+    echo "  version.py    $packaged"
+    echo "  pyproject     $project"
+    echo "  CHANGELOG     $logged"
+
+    if [ "$project" != "$packaged" ]; then
+        echo "  pyproject.toml says $project, the package says $packaged" >&2
+        exit 1
+    fi
+    if [ "$logged" != "$packaged" ]; then
+        echo "  CHANGELOG.md's newest section is $logged, the package says $packaged" >&2
+        echo "  the release workflow builds its notes from that section" >&2
+        exit 1
+    fi
+
+    # Advisory, not fatal: the tag is pushed after the release commit lands, so
+    # for one commit its absence is correct rather than broken.
+    if [ -d "$root/.git" ] && command -v git >/dev/null 2>&1; then
+        if git -C "$root" rev-parse -q --verify "refs/tags/v$packaged" >/dev/null; then
+            echo "  tag           v$packaged"
+        else
+            echo "  tag           v$packaged is NOT cut -- no GitHub release ships this"
+            echo "                cut it with: sh tools/release.sh"
+        fi
+    fi
 }
 
 check_tests() {
@@ -61,10 +104,11 @@ check_matrix() {
 
 case $mode in
     --shell) check_shell ;;
+    --version) check_version ;;
     --tests) check_tests ;;
-    --matrix) check_shell; check_tests; check_matrix ;;
-    all) check_shell; check_tests ;;
-    *) echo "usage: preflight.sh [--shell|--tests|--matrix]" >&2; exit 2 ;;
+    --matrix) check_version; check_shell; check_tests; check_matrix ;;
+    all) check_version; check_shell; check_tests ;;
+    *) echo "usage: preflight.sh [--shell|--version|--tests|--matrix]" >&2; exit 2 ;;
 esac
 
 echo

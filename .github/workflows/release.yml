@@ -27,6 +27,9 @@ jobs:
             exit 1
           fi
 
+      - name: The packaged version, pyproject and the changelog must agree
+        run: sh tools/preflight.sh --version
+
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
