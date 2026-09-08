@@ -862,6 +862,16 @@ runs the suite against the tagged tree, and publishes that version's changelog
 section as the release notes. A version that is never tagged reaches nobody,
 so `sh tools/preflight.sh --version` says so out loud.
 
+**Release when the installed behaviour changes, not on every commit.** The
+version is published on `/Mgmt/ProcessVersion`, so it is what Venus, VRM and
+every bug report call the running adapter — two numbers for identical code
+make a report ambiguous rather than precise. Documentation, tests, CI and dev
+tooling reach people from `main` directly and need no release; `src/` and
+`install/` reach them only through the tarball, so the same check reports when
+those have moved past the tag. The exception is a documentation fix that
+corrects something dangerous — a wrong limit, a command that could damage
+hardware — which is worth carrying into the artifact too.
+
 [`docs/protocol-notes.md`](docs/protocol-notes.md) records what has been
 confirmed against the vendor's own app and protocol document, what is only
 probable, and what is still unknown.

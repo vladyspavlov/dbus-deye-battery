@@ -67,6 +67,18 @@ check_version() {
     if [ -d "$root/.git" ] && command -v git >/dev/null 2>&1; then
         if git -C "$root" rev-parse -q --verify "refs/tags/v$packaged" >/dev/null; then
             echo "  tag           v$packaged"
+            # Drifting past a tag is only a problem when what drifted is the
+            # thing people install. The version names the running adapter --
+            # it is published on /Mgmt/ProcessVersion, so two numbers for
+            # identical code make a bug report ambiguous. Documentation, CI
+            # and dev tooling reach people from main directly and need no
+            # release; src/ and install/ reach them only through the tarball.
+            if ! git -C "$root" diff --quiet "v$packaged..HEAD" -- src install; then
+                commits=$(git -C "$root" rev-list --count "v$packaged..HEAD" -- src install)
+                echo "  drift         src/ or install/ changed in $commits commit(s) since v$packaged"
+                echo "                that code is released to nobody; bump VERSION and"
+                echo "                add its CHANGELOG section before releasing"
+            fi
         else
             echo "  tag           v$packaged is NOT cut -- no GitHub release ships this"
             echo "                cut it with: sh tools/release.sh"
