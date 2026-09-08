@@ -379,17 +379,20 @@ CAN_INTERFACE=can1 MODEL=SE-F16-C \
 | `VERSION` | latest release | Install an exact release instead |
 | `CAN_INTERFACE` | auto-detected | Skip detection and use this port |
 | `MODEL` | none | Variant shown in the GX device list, e.g. `SE-F12-C` |
-| `DEVICE_INSTANCE` | `513` | Preferred VRM instance; Venus may grant another |
-| `AUTO_DEVICE_INSTANCE` | `1` | `0` publishes `DEVICE_INSTANCE` verbatim and writes no setting |
+| `DEVICE_INSTANCE` | `513`, only a preference | The instance to ask Venus for; it grants that one when free and the next free one otherwise — [details](#device-instance-and-running-more-than-one-pack) |
+| `AUTO_DEVICE_INSTANCE` | `1` on a fresh install, `0` on upgrade | `0` skips the negotiation, publishes `DEVICE_INSTANCE` verbatim and writes no Venus setting |
 | `SERVICE_NAME` | `com.victronenergy.battery.deye_lv` | Change only if you run more than one pack |
 | `SHA256` | none | Refuse the download unless it matches this checksum |
 | `ALLOW_DOWNGRADE` | unset | Permit installing older code than is running |
 | `DRY_RUN` | unset | Print what would happen and write nothing |
 
 Settings are only seeded on a **first** install. On an upgrade your existing
-`/data/deye-virtual-battery/config` is left exactly as it is, because silently
-moving a working system onto a different CAN port or a different D-Bus identity
-is a good way to lose your battery monitor.
+`/data/deye-virtual-battery/config` is left as it is, with two deliberate
+exceptions: if it names no `SERVICE_NAME`, or no `AUTO_DEVICE_INSTANCE`,
+`install.sh` appends whichever value the system is already running with. Both
+of those are identity, and silently moving a working system onto a different
+CAN port, a different D-Bus name or a different VRM instance is a good way to
+lose your battery monitor.
 
 ### Reading it before you run it
 
