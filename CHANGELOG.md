@@ -3,7 +3,7 @@
 Versions are strictly numeric: Venus OS and VRM display `/Mgmt/ProcessVersion`
 verbatim, so no suffixes or build tags appear here.
 
-## Unreleased
+## 0.7.7
 
 ### Fixed
 - **`--device-instance` was ignored.** `/DeviceInstance` was published from a

@@ -7,7 +7,7 @@
 # for, and runs install/install.sh.  Everything is settable from the
 # environment, because a piped script cannot take arguments:
 #
-#   VERSION=0.7.6        release to install; default is the latest one
+#   VERSION=0.7.7        release to install; default is the latest one
 #   CAN_INTERFACE=can1   skip auto-detection of the BMS-Can port
 #   MODEL=SE-F12-C       shown in the GX device list
 #   DEVICE_INSTANCE=513  preferred VRM instance; Venus may grant another
