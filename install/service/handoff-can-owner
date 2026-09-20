@@ -38,7 +38,7 @@ discover_vebus() {
         | tr -d "\r" \
         | sed -n 's/.*\(com\.victronenergy\.vebus\.[A-Za-z0-9_]*\).*/\1/p' \
         | sort -u \
-        | head -1
+        | head -n 1
 }
 
 vebus_service=$(discover_vebus)

@@ -3,6 +3,24 @@
 Versions are strictly numeric: Venus OS and VRM display `/Mgmt/ProcessVersion`
 verbatim, so no suffixes or build tags appear here.
 
+## 0.7.8
+
+### Fixed
+- **`handoff-can-owner` aborted on every busybox GX.** Its VE.Bus discovery
+  piped through `head -1`, which GNU coreutils accepts but the busybox `head`
+  on Venus OS rejects (`invalid option -- '1'`). Under `set -e` the handoff
+  died in `discover_vebus` before arming anything — so it failed safe (the
+  stock driver kept the keepalive), but the CAN handover could never complete
+  on a real device. Now `head -n 1`. This shipped in `install/`, so it is
+  carried into the release rather than left on `main`.
+
+### Verified
+- **Second model confirmed on hardware: Deye SE-G5.1 Pro B** (100 Ah, 16
+  series) — a different series and capacity from the SE-F12-C. It decodes with
+  zero errors on the same `deye_native` frame set, and the driver runs live as
+  its controlling BMS with capacity and series count measured from the pack.
+  No code was model-specific; see [Compatibility](README.md#compatibility-and-tested-scope).
+
 ## 0.7.7
 
 ### Fixed

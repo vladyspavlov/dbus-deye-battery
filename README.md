@@ -194,16 +194,20 @@ pack transmits — set it with `MODEL=` if you want your exact variant displayed
 | Model | Status |
 |---|---|
 | **Deye SE-F12-C** | Verified — developed and running against one installation |
+| **Deye SE-G5.1 Pro B** | Verified on hardware — 100 Ah, 16-series, running live as the controlling BMS |
 | **Deye SE-F5-C** | Expected to work, unconfirmed on hardware |
 | **Deye SE-F16-C** | Expected to work, unconfirmed on hardware |
 | Other Deye LV packs on the PCS CAN protocol | Plausible, unconfirmed |
 
-The SE-F series shares one PCS interface, so the other variants should speak
-the same protocol — differing only in capacity and possibly series count, both
-of which the driver measures rather than assumes.
+A second model is now confirmed on hardware: the **SE-G5.1 Pro B** — a different
+series and capacity from the SE-F12-C — decoded with zero errors on the same
+`deye_native` (Sol-ark) frame set and runs live as the controlling BMS, with the
+driver reading its 100 Ah capacity and 16-series count for itself. That two
+different packs need no model-specific code is the strongest evidence yet that
+nothing here is tied to one battery.
 
-Nobody has confirmed any of that on hardware. If you run it on anything other
-than an SE-F12-C, please [open an issue](https://github.com/vladyspavlov/dbus-deye-battery/issues)
+If you run it on a model not listed as verified, please
+[open an issue](https://github.com/vladyspavlov/dbus-deye-battery/issues)
 with a `candump` log — that is the single most useful thing you can contribute,
 and it is what turns "expected to work" into "tested".
 
@@ -408,7 +412,7 @@ DRY_RUN=1 sh bootstrap.sh       # says what it would do, writes nothing
 sh bootstrap.sh
 
 # 2. Pin the release archive to a checksum you obtained yourself.
-VERSION=0.7.7 SHA256=<sha256 of the tarball> sh bootstrap.sh
+VERSION=0.7.8 SHA256=<sha256 of the tarball> sh bootstrap.sh
 
 # 3. Skip the bootstrap entirely and do it by hand -- see below.
 ```
@@ -519,7 +523,7 @@ set of files, so the version the driver reports on D-Bus and in VRM always maps
 back to exact code, which is what you need when something misbehaves at 2am.
 
 ```sh
-VERSION=0.7.7          # see the Releases page for the current one
+VERSION=0.7.8          # see the Releases page for the current one
 
 cd /data
 wget -O deye.tar.gz https://github.com/vladyspavlov/dbus-deye-battery/archive/refs/tags/v$VERSION.tar.gz
