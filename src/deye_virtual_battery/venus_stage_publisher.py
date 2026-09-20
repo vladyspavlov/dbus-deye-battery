@@ -147,7 +147,7 @@ def _add_paths(
         "/CustomName": "Deye LV battery (staged; do not select)",
         "/Manufacturer": "Deye",
         "/FirmwareVersion": "shadow-stage",
-        "/HardwareVersion": "Deye SE-F series",
+        "/HardwareVersion": "Deye LV pack (staged)",
         "/Diagnostics/Stage/NoCanTransmit": 1,
         "/Diagnostics/Stage/NoDbusWrites": 1,
         "/Diagnostics/Stage/RequiresNoBmsControl": 1,

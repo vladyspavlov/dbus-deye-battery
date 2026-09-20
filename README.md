@@ -1,6 +1,6 @@
 # dbus-deye-battery
 
-**Victron Venus OS battery driver for Deye SE-F LV packs over BMS-Can.**
+**Victron Venus OS battery driver for Deye LV packs over BMS-Can.**
 
 Decodes the Deye PCS CAN protocol directly and publishes a native
 `com.victronenergy.battery.*` D-Bus service, so a Deye low-voltage pack appears
@@ -36,7 +36,7 @@ current sign — instead of being misidentified as an LG RESU.
 
 ## The problem this solves
 
-**Out of the box, Venus OS identifies a Deye SE-F pack as an LG RESU.**
+**Out of the box, Venus OS identifies a Deye LV pack as an LG RESU.**
 
 Venus ships a closed CAN battery driver that works out the manufacturer from
 the frames on the wire. Current Deye firmware no longer sends the vendor marker
@@ -249,7 +249,7 @@ short-circuit-discharge protection (AFE-SCD)** with no real fault present. The
 BMS opened its discharge path, the battery dropped off the bus, and the Victron
 shut down as a consequence. Updating the BMS firmware stopped it.
 
-If you are chasing unexplained dropouts on a Deye SE-F pack, do the firmware
+If you are chasing unexplained dropouts on a Deye LV pack, do the firmware
 update before suspecting your cabling, your GX, or a driver.
 
 This driver decodes that condition rather than hiding it —

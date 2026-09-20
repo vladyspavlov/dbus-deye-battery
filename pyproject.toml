@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "dbus-deye-battery"
 version = "0.7.8"
-description = "Victron Venus OS battery driver for Deye SE-F LV packs over BMS-Can"
+description = "Victron Venus OS battery driver for Deye LV packs over BMS-Can"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
 keywords = [
     "victron", "venus-os", "gx", "cerbo-gx", "multiplus", "dvcc",
-    "deye", "se-f12", "se-f5", "se-f16", "lifepo4", "lfp",
+    "deye", "se-f12", "se-f5", "se-f16", "se-g5", "lifepo4", "lfp",
     "bms", "bms-can", "can-bus", "socketcan", "dbus", "battery", "solar",
 ]
 classifiers = [

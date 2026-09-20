@@ -1,4 +1,4 @@
-"""Victron Venus OS battery driver for Deye SE-F LV packs over BMS-Can.
+"""Victron Venus OS battery driver for Deye LV packs over BMS-Can.
 
 The package decodes the Deye PCS CAN protocol from a passively observed
 SocketCAN interface and publishes a native ``com.victronenergy.battery.*``

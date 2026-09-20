@@ -15,7 +15,7 @@ from deye_virtual_battery.version import VERSION
 
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = "dbus-deye-battery"
-DESCRIPTION = "Victron Venus OS battery driver for Deye SE-F LV packs over BMS-Can"
+DESCRIPTION = "Victron Venus OS battery driver for Deye LV packs over BMS-Can"
 READMES = ("README.md", "README.uk.md")
 
 
