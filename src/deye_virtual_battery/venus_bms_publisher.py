@@ -620,7 +620,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--model",
         default=None,
         help="model designation shown in the GX device list, e.g. SE-F12-C, "
-        "SE-F5-C or SE-F16-C. "
+        "SE-F5 Pro-C or SE-F16-C. "
         "Not transmitted on CAN, so it cannot be detected.",
     )
     parser.add_argument(

@@ -156,6 +156,20 @@ def test_a_fresh_install_lands_where_it_should_and_touches_nothing_else():
 
 
 @needs_sandbox
+def test_a_model_name_with_a_space_survives_the_config_being_sourced():
+    """service/run sources the config; an unquoted "SE-F5 Pro-C" would be lost."""
+    done = run_in_gx(
+        "MODEL='SE-F5 Pro-C' dash /gxsrc/install/bootstrap.sh >/gxlog/out 2>&1; "
+        'echo "exit=$?"; '
+        "dash -c '. /data/deye-virtual-battery/config 2>&1; echo \"model=[$MODEL]\"'"
+    )
+    out = done.stdout
+    assert "exit=0" in out, done.stderr
+    assert "model=[SE-F5 Pro-C]" in out
+    assert "not found" not in out
+
+
+@needs_sandbox
 def test_the_suite_runs_from_an_unpacked_release_with_no_git():
     """People run these tests from a release tarball, which has no .git."""
     export = Path(tempfile.mkdtemp(prefix="nogit-")) / "tree"

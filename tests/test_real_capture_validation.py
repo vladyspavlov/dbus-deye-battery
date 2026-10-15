@@ -41,6 +41,33 @@ def test_validator_passes_preserved_real_capture():
     assert result["coverage"]["real_active_alarm_or_warning_bits_observed"] is False
 
 
+def test_validator_checks_capacity_against_the_requested_pack(tmp_path):
+    """A 100 Ah pack must be judged against 100 Ah, not the reference 230 Ah."""
+    capture = tmp_path / "100ah.log"
+    with PRESERVED.open(encoding="ascii") as source, capture.open("w") as target:
+        for line in source:
+            # 0x35E bytes 6-7 carry the nominal capacity: 0x08FC -> 0x03E8.
+            target.write(line.replace("35E#44593030311CFC08", "35E#44593030311CE803"))
+
+    capacity_checks = {
+        "Deye nominal capacity is consistently 100 Ah",
+        "capacity and unavailable cell IDs map to Victron D-Bus semantics",
+    }
+    result = validate([capture], capacity_ah=100.0)
+    checks = {check["name"]: check["passed"] for check in result["checks"]}
+    assert result["observations"]["nominal_capacities_ah"] == [100.0]
+    assert all(checks[name] for name in capacity_checks)
+    assert result["result"] == "pass"
+
+    mismatched = validate([capture])
+    assert mismatched["result"] == "fail"
+    assert not any(
+        check["passed"]
+        for check in mismatched["checks"]
+        if check["name"].startswith("Deye nominal capacity")
+    )
+
+
 @pytest.mark.skipif(not CHARGE_RETRY.exists(), reason="optional private capture not installed in tests/data/private")
 def test_real_one_second_ccl_pulse_cannot_raise_effective_charge_limit():
     cache = VirtualBatteryCache()

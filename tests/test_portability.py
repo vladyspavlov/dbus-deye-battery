@@ -323,7 +323,7 @@ def test_the_model_name_is_the_operators_to_set():
     assert _product_name(None) == "Deye LV battery"
     assert _product_name("") == "Deye LV battery"
     assert _product_name("SE-F16-C") == "Deye SE-F16-C"
-    assert _product_name("SE-F5-C") == "Deye SE-F5-C"
+    assert _product_name("SE-F5 Pro-C") == "Deye SE-F5 Pro-C"
     # Already qualified, so it is not doubled.
     assert _product_name("Deye SE-F12-C") == "Deye SE-F12-C"
 
