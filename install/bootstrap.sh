@@ -173,7 +173,9 @@ main() {
             key=${pair%%=*}
             value=${pair#*=}
             [ -n "$value" ] || continue
-            sed -i "s|^#\{0,1\}[[:space:]]*$key=.*|$key=$value|" "$DEST_ROOT/config"
+            # Quoted, because the config is sourced by service/run and a
+            # model name such as "SE-F5 Pro-C" contains a space.
+            sed -i "s|^#\{0,1\}[[:space:]]*$key=.*|$key='$value'|" "$DEST_ROOT/config"
             echo "config: $key=$value"
         done
         svc -t /service/deye-virtual-battery 2>/dev/null || true
