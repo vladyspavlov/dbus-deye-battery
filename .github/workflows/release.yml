@@ -41,17 +41,7 @@ jobs:
 
       - name: Extract this version's changelog section
         run: |
-          python3 - "${GITHUB_REF_NAME#v}" > release-notes.md <<'PY'
-          import sys, pathlib, re
-          version = sys.argv[1]
-          text = pathlib.Path("CHANGELOG.md").read_text()
-          match = re.search(
-              rf"^## {re.escape(version)}\s*$(.*?)(?=^## |\Z)", text, re.M | re.S
-          )
-          if not match:
-              sys.exit(f"CHANGELOG.md has no '## {version}' section")
-          print(match.group(1).strip())
-          PY
+          python3 tools/release_notes.py "${GITHUB_REF_NAME#v}" > release-notes.md
           cat release-notes.md
 
       - name: Publish
