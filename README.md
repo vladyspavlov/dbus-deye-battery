@@ -195,7 +195,7 @@ pack transmits — set it with `MODEL=` if you want your exact variant displayed
 |---|---|
 | **Deye SE-F12-C** | Verified — developed and running against one installation |
 | **Deye SE-G5.1 Pro B** | Verified on hardware — 100 Ah, 16-series, running live as the controlling BMS |
-| **Deye SE-F5-C** | Expected to work, unconfirmed on hardware |
+| **Deye SE-F5 Pro-C** | Verified on hardware by a user — 100 Ah, 16-series, decoded with zero errors ([#1](https://github.com/vladyspavlov/dbus-deye-battery/issues/1)) |
 | **Deye SE-F16-C** | Expected to work, unconfirmed on hardware |
 | Other Deye LV packs on the PCS CAN protocol | Plausible, unconfirmed |
 
@@ -204,7 +204,10 @@ series and capacity from the SE-F12-C — decoded with zero errors on the same
 `deye_native` (Sol-ark) frame set and runs live as the controlling BMS, with the
 driver reading its 100 Ah capacity and 16-series count for itself. That two
 different packs need no model-specific code is the strongest evidence yet that
-nothing here is tied to one battery.
+nothing here is tied to one battery. A third, the **SE-F5 Pro-C**, has since
+been confirmed by a user ([#1](https://github.com/vladyspavlov/dbus-deye-battery/issues/1)): its capture decodes with zero errors on
+the same `deye_native` frame set, again with 100 Ah and 16 cells read from the
+wire.
 
 If you run it on a model not listed as verified, please
 [open an issue](https://github.com/vladyspavlov/dbus-deye-battery/issues)
@@ -775,9 +778,10 @@ hand over CAN ownership if the stock driver keeps publishing a misidentified
 service, because Venus's vendor-specific logic binds to *any* matching service,
 not just the selected one. See [CAN keepalive ownership](#can-keepalive-ownership-only-if-you-need-it).
 
-**Will it work on an SE-F5-C or SE-F16-C?**
-Probably — nothing in the driver is model-specific — but nobody has confirmed
-it on hardware. See [Compatibility](#compatibility-and-tested-scope).
+**Will it work on an SE-F16-C?**
+Probably — nothing in the driver is model-specific, and the SE-F12-C,
+SE-G5.1 Pro B and SE-F5 Pro-C are all confirmed — but nobody has confirmed the
+SE-F16-C on hardware yet. See [Compatibility](#compatibility-and-tested-scope).
 
 **Does it survive a Venus OS firmware update?**
 The source lives in `/data` and is restored by a `/data/rc.local` hook, which

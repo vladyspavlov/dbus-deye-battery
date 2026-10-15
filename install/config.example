@@ -41,9 +41,10 @@ AUTO_DEVICE_INSTANCE=1
 # Only set this if you need a reservation to survive replacing a pack.
 DEVICE_SETTINGS_ID=
 
-# Model designation shown in the GX device list, e.g. SE-F12-C, SE-F5-C,
-# SE-F16-C.  No Deye pack transmits its model over CAN, so this cannot be
-# detected and is purely cosmetic.  Leave empty for a generic name.
+# Model designation shown in the GX device list, e.g. SE-F12-C,
+# "SE-F5 Pro-C", SE-F16-C (quote a value that contains a space).  No Deye pack
+# transmits its model over CAN, so this cannot be detected and is purely
+# cosmetic.  Leave empty for a generic name.
 MODEL=
 
 # Series cell count to assume ONLY if it cannot be measured from the pack and
