@@ -3,6 +3,25 @@
 Versions are strictly numeric: Venus OS and VRM display `/Mgmt/ProcessVersion`
 verbatim, so no suffixes or build tags appear here.
 
+## 0.7.10
+
+### Fixed
+- **A `MODEL=` value containing a space was silently dropped**
+  ([#1](https://github.com/vladyspavlov/dbus-deye-battery/issues/1)).
+  `install/bootstrap.sh` seeded the config unquoted, and `service/run`
+  sources it, so `MODEL=SE-F5 Pro-C` ran `Pro-C` as a command and the GX
+  showed the generic name. Seeded values are now single-quoted. An existing
+  config is never rewritten on upgrade: if you set such a model by hand,
+  quote it yourself.
+- `tools/validate_real_captures.py` compared capacity against a hard-coded
+  230 Ah and ignored `--capacity-ah`, so any other pack size failed.
+
+### Compatibility
+- **Deye SE-F5 Pro-C** confirmed on hardware by a user: zero decode errors on
+  the `deye_native` frame set, 100 Ah and 16 cells read from the wire.
+- SE-F5-C removed from the documentation; it does not appear to be a real
+  model designation.
+
 ## 0.7.9
 
 ### Fixed
