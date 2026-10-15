@@ -3,6 +3,30 @@
 Versions are strictly numeric: Venus OS and VRM display `/Mgmt/ProcessVersion`
 verbatim, so no suffixes or build tags appear here.
 
+## 0.7.9
+
+### Fixed
+- **`handoff-can-owner` could never complete on a fresh install**
+  ([#2](https://github.com/vladyspavlov/dbus-deye-battery/issues/2)). It
+  refused unless the driver reported `/Diagnostics/CanTx/FeatureEnabled = 1`,
+  but the driver set that once at startup from the
+  `/data/deye-virtual-battery/can-tx-enabled` marker, and the only thing that
+  creates the marker is a successful handoff. So the handoff always stopped
+  with *"virtual BMS is not selected, fresh, progressing, and TX-capable"*,
+  and the stock `can-bus-bms` driver kept publishing its misidentified
+  LG battery service. It failed safe: nothing was armed and the stock driver
+  kept the keepalive.
+
+  The driver now polls the marker (`--can-tx-enable-file`) instead of reading
+  it once, and `FeatureEnabled` is published live. The handoff checks its
+  other preconditions, creates the marker, waits for the running driver to
+  report the feature enabled, and only then arms and stops the stock driver.
+  If the driver never reports it (for example an older driver), the handoff
+  removes the marker and refuses without touching the stock driver. Transmission
+  still needs all three of the feature, the runtime arm file and a proven-absent
+  stock driver. The TX socket is now opened on first ownership rather than at
+  startup.
+
 ## 0.7.8
 
 ### Fixed

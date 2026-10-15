@@ -35,8 +35,10 @@ set -- \
 
 # The keepalive transmitter stays inert unless the operator has explicitly
 # handed CAN ownership over with install/service/handoff-can-owner, which
-# creates this marker.  Installing the package never starts transmitting.
-[ -f "$root/can-tx-enabled" ] && set -- "$@" --allow-can-transmit
+# creates this marker.  The driver polls it, so the handoff can enable the
+# feature without restarting this service, and rollback-can-owner disables it
+# the same way.  Installing the package never starts transmitting.
+set -- "$@" --can-tx-enable-file "$root/can-tx-enabled"
 
 exec env PYTHONPATH="$root/src" \
     python3 -u -m deye_virtual_battery.venus_bms_publisher "$@"

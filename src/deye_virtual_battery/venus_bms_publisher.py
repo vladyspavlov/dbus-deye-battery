@@ -28,7 +28,11 @@ import sys
 import time
 from typing import Any, Callable
 
-from .can_keepalive import KeepaliveSnapshot, KeepaliveTransmitter
+from .can_keepalive import (
+    DEFAULT_ENABLE_FILE,
+    KeepaliveSnapshot,
+    KeepaliveTransmitter,
+)
 from .policy import PolicyConfig
 from .venus_discovery import VebusLocator, read_vebus_voltage
 from .venus_instance import (
@@ -151,6 +155,8 @@ def _qualify(
 
 
 TX_DYNAMIC_PATHS = {
+    "/Diagnostics/Commissioning/NoCanTransmit",
+    "/Diagnostics/CanTx/FeatureEnabled",
     "/Diagnostics/CanTx/Armed",
     "/Diagnostics/CanTx/StockDriverRunning",
     "/Diagnostics/CanTx/Owner",
@@ -169,6 +175,8 @@ PUBLISHER_DYNAMIC_PATHS = {
 
 def _tx_values(snapshot: KeepaliveSnapshot) -> dict[str, Any]:
     return {
+        "/Diagnostics/Commissioning/NoCanTransmit": int(not snapshot.feature_enabled),
+        "/Diagnostics/CanTx/FeatureEnabled": int(snapshot.feature_enabled),
         "/Diagnostics/CanTx/Armed": int(snapshot.armed),
         "/Diagnostics/CanTx/StockDriverRunning": int(snapshot.stock_driver_running),
         "/Diagnostics/CanTx/Owner": int(snapshot.owner),
@@ -228,7 +236,6 @@ def _instance_paths(resolution: InstanceResolution | None) -> dict[str, Any]:
 def _fixed_paths(
     config: PolicyConfig,
     *,
-    can_tx_enabled: bool = False,
     interface: str = "can0",
     serial: str | None = None,
     model: str | None = None,
@@ -258,7 +265,6 @@ def _fixed_paths(
         "/HardwareVersion": _hardware_version(config, model),
         "/Capabilities/ChargeVoltageControl": 0,
         "/Diagnostics/Commissioning/Selectable": 1,
-        "/Diagnostics/Commissioning/NoCanTransmit": int(not can_tx_enabled),
         # Reporting what this run did, not what the project aspires to: the
         # optional instance reservation is the one localsettings write this
         # driver can make, and it is an identity mapping, never a control
@@ -267,7 +273,6 @@ def _fixed_paths(
             resolution is None or not resolution.attempted_settings_write
         ),
         "/Diagnostics/Commissioning/NoVebusModeWrites": 1,
-        "/Diagnostics/CanTx/FeatureEnabled": int(can_tx_enabled),
         "/Diagnostics/CanTx/ArmFile": "/run/deye-virtual-battery/tx-armed",
         "/Diagnostics/Safety/CurrentLimitsFromFreshDeyeFrames": 1,
         "/Diagnostics/Safety/RuntimeClock": "monotonic-anchored-wall",
@@ -295,7 +300,6 @@ def _add_paths(
 ) -> set[str]:
     fixed = _fixed_paths(
         config,
-        can_tx_enabled=can_tx_enabled,
         interface=interface,
         serial=serial,
         model=model,
@@ -441,6 +445,7 @@ def run(arguments: argparse.Namespace) -> int:
     transmitter = KeepaliveTransmitter(
         interface=arguments.interface,
         feature_enabled=arguments.allow_can_transmit,
+        enable_file=arguments.can_tx_enable_file,
     )
     transmitter.start()
     vebus = VebusLocator(explicit=arguments.vebus_service, clock=time.monotonic)
@@ -603,6 +608,14 @@ def build_parser() -> argparse.ArgumentParser:
         "serial, then the CAN interface name.",
     )
     parser.add_argument("--allow-can-transmit", action="store_true")
+    parser.add_argument(
+        "--can-tx-enable-file",
+        type=Path,
+        default=DEFAULT_ENABLE_FILE,
+        help="marker whose presence enables the CAN keepalive feature while "
+        "the service runs (created by handoff-can-owner). Transmission still "
+        "also requires the runtime arm file and the stock driver to be absent.",
+    )
     parser.add_argument(
         "--model",
         default=None,
