@@ -412,7 +412,7 @@ DRY_RUN=1 sh bootstrap.sh       # says what it would do, writes nothing
 sh bootstrap.sh
 
 # 2. Pin the release archive to a checksum you obtained yourself.
-VERSION=0.7.8 SHA256=<sha256 of the tarball> sh bootstrap.sh
+VERSION=0.7.9 SHA256=<sha256 of the tarball> sh bootstrap.sh
 
 # 3. Skip the bootstrap entirely and do it by hand -- see below.
 ```
@@ -523,7 +523,7 @@ set of files, so the version the driver reports on D-Bus and in VRM always maps
 back to exact code, which is what you need when something misbehaves at 2am.
 
 ```sh
-VERSION=0.7.8          # see the Releases page for the current one
+VERSION=0.7.9          # see the Releases page for the current one
 
 cd /data
 wget -O deye.tar.gz https://github.com/vladyspavlov/dbus-deye-battery/archive/refs/tags/v$VERSION.tar.gz

@@ -16,7 +16,7 @@ device_instance=$DEVICE_INSTANCE
 stock_service=/service/can-bus-bms.$CAN_INTERFACE
 runtime_dir=/run/deye-virtual-battery
 arm_file=$runtime_dir/tx-armed
-persistent_marker=/data/deye-virtual-battery/can-tx-enabled
+persistent_marker=$root/can-tx-enabled
 boot_mode=0
 
 if [ "${1:-}" = "--boot" ]; then
@@ -70,7 +70,6 @@ preconditions_ready() {
     [ "$(read_value com.victronenergy.settings /Settings/SystemSetup/BmsInstance || true)" = "$device_instance" ] &&
     [ "$(read_value com.victronenergy.system /ActiveBmsInstance || true)" = "$device_instance" ] &&
     [ "$(read_value "$virtual_service" /Connected || true)" = "1" ] &&
-    [ "$(read_value "$virtual_service" /Diagnostics/CanTx/FeatureEnabled || true)" = "1" ] &&
     [ "$(read_value "$virtual_service" /Diagnostics/Lifecycle/State || true)" = "'online'" ] &&
     [ "$(read_value "$virtual_service" /Diagnostics/Lifecycle/CanAlive || true)" = "1" ] &&
     [ "$(read_value "$virtual_service" /Diagnostics/Alarms/CriticalDataStale || true)" = "0" ] &&
@@ -106,6 +105,7 @@ mkdir -p "$runtime_dir"
 chmod 0755 "$runtime_dir"
 
 handoff_started=0
+marker_created=0
 rollback_on_failure() {
     status=$?
     trap - EXIT HUP INT TERM
@@ -113,9 +113,32 @@ rollback_on_failure() {
         rm -f "$arm_file"
         svc -u "$stock_service" >/dev/null 2>&1 || true
     fi
+    if [ "$marker_created" -eq 1 ]; then
+        rm -f "$persistent_marker"
+    fi
     exit "$status"
 }
 trap rollback_on_failure EXIT HUP INT TERM
+
+# The persistent marker is the operator's consent to transmit.  The driver
+# polls it, so creating it here enables the feature in the running service.
+# Prove that before touching the stock driver: an older driver that read the
+# marker only at startup reports 0 here, and the handoff stops while the stock
+# driver still owns the keepalive.
+if [ ! -f "$persistent_marker" ]; then
+    marker_created=1
+    touch "$persistent_marker"
+    chmod 0600 "$persistent_marker"
+fi
+attempt=0
+until [ "$(read_value "$virtual_service" /Diagnostics/CanTx/FeatureEnabled || true)" = "1" ]; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 30 ]; then
+        echo "handoff refused: virtual driver does not report the CAN keepalive feature enabled" >&2
+        exit 3
+    fi
+    sleep 0.1
+done
 
 touch "$arm_file"
 chmod 0600 "$arm_file"
@@ -133,9 +156,8 @@ while [ "$attempt" -lt 40 ]; do
     if [ "$owner" = "1" ] && [ "${pairs:-0}" -gt 0 ] &&
         [ "${errors:-1}" -eq 0 ] && [ "$connected" = "1" ] &&
         [ "$can_alive" = "1" ] && [ "$stale" = "0" ]; then
-        touch "$persistent_marker"
-        chmod 0600 "$persistent_marker"
         handoff_started=0
+        marker_created=0
         trap - EXIT HUP INT TERM
         echo "handoff complete: virtual driver owns Deye keepalive"
         exit 0

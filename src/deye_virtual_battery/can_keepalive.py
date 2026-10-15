@@ -19,6 +19,11 @@ KEEPALIVE_FRAMES = (
     (0x307, bytes.fromhex("1234567856494300")),
 )
 DEFAULT_ARM_FILE = Path("/run/deye-virtual-battery/tx-armed")
+# Persistent operator consent, created by handoff-can-owner.  Polled rather than
+# read once at startup: the handoff needs this service to report the feature
+# enabled before it stops the stock driver, and a service that only learned of
+# the marker at startup could never do so on a fresh install.
+DEFAULT_ENABLE_FILE = Path("/data/deye-virtual-battery/can-tx-enabled")
 STOCK_DRIVER_EXE = "/opt/victronenergy/can-bus-bms/can-bus-bms"
 
 
@@ -74,14 +79,18 @@ class KeepaliveTransmitter:
         interface: str,
         feature_enabled: bool,
         arm_file: Path = DEFAULT_ARM_FILE,
+        enable_file: Path | None = None,
         stock_detector: Callable[[], bool] = stock_driver_running,
         socket_factory: Callable[[str], Any] = _open_tx_socket,
         period_seconds: float = 1.0,
         poll_seconds: float = 0.05,
     ) -> None:
         self.interface = interface
-        self.feature_enabled = bool(feature_enabled)
+        # The command-line flag enables the feature for the life of the
+        # process; the enable file enables it only while it exists.
+        self.feature_flag = bool(feature_enabled)
         self.arm_file = arm_file
+        self.enable_file = enable_file
         self.stock_detector = stock_detector
         self.socket_factory = socket_factory
         self.period_seconds = float(period_seconds)
@@ -89,6 +98,7 @@ class KeepaliveTransmitter:
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
+        self._feature_enabled = self.feature_flag
         self._armed = False
         self._stock_running = True
         self._owner = False
@@ -116,7 +126,7 @@ class KeepaliveTransmitter:
     def snapshot(self) -> KeepaliveSnapshot:
         with self._lock:
             return KeepaliveSnapshot(
-                feature_enabled=self.feature_enabled,
+                feature_enabled=self._feature_enabled,
                 armed=self._armed,
                 stock_driver_running=self._stock_running,
                 owner=self._owner,
@@ -132,17 +142,17 @@ class KeepaliveTransmitter:
         next_send = time.monotonic()
         previous_owner = False
         try:
-            if self.feature_enabled:
-                can_socket = self.socket_factory(self.interface)
             while not self._stop.is_set():
+                feature_enabled = self._read_feature_enabled()
                 armed = self.arm_file.is_file()
                 stock_running = self.stock_detector()
                 owner = ownership_allowed(
-                    feature_enabled=self.feature_enabled,
+                    feature_enabled=feature_enabled,
                     armed=armed,
                     stock_running=stock_running,
                 )
                 with self._lock:
+                    self._feature_enabled = feature_enabled
                     self._armed = armed
                     self._stock_running = stock_running
                     self._owner = owner
@@ -156,8 +166,14 @@ class KeepaliveTransmitter:
                     next_send = time.monotonic()
                     previous_owner = owner
                 now = time.monotonic()
-                if owner and can_socket is not None and now >= next_send:
-                    self._send_pair(can_socket)
+                if owner and now >= next_send:
+                    # Opened on first ownership, so a service that never takes
+                    # the keepalive never holds a TX socket.  A failed open is
+                    # retried once per period, like a failed send.
+                    if can_socket is None:
+                        can_socket = self._open_socket()
+                    if can_socket is not None:
+                        self._send_pair(can_socket)
                     next_send = now + self.period_seconds
                 self._stop.wait(self.poll_seconds)
         finally:
@@ -165,6 +181,23 @@ class KeepaliveTransmitter:
                 self._owner = False
             if can_socket is not None:
                 can_socket.close()
+
+    def _read_feature_enabled(self) -> bool:
+        if self.feature_flag:
+            return True
+        return self.enable_file is not None and self.enable_file.is_file()
+
+    def _open_socket(self) -> Any:
+        """Open the TX socket on first ownership; count a failure, retry later."""
+
+        try:
+            return self.socket_factory(self.interface)
+        except OSError as error:
+            with self._lock:
+                self._tx_errors += 1
+                self._last_error = str(error)
+            logging.error("Deye CAN keepalive socket could not be opened: %s", error)
+            return None
 
     def _send_pair(self, can_socket: Any) -> None:
         try:

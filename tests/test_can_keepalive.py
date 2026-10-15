@@ -85,3 +85,80 @@ def test_transmitter_waits_for_stock_exit_and_stops_when_disarmed(tmp_path: Path
     finally:
         transmitter.stop()
     assert fake_socket.closed is True
+
+
+def test_enable_file_is_polled_and_gates_transmission(tmp_path: Path):
+    """Issue #2: the feature follows the marker without a service restart."""
+    arm_file = tmp_path / "tx-armed"
+    arm_file.touch()
+    enable_file = tmp_path / "can-tx-enabled"
+    opened: list[FakeSocket] = []
+
+    def factory(_: str) -> FakeSocket:
+        opened.append(FakeSocket())
+        return opened[-1]
+
+    transmitter = KeepaliveTransmitter(
+        interface="can0",
+        feature_enabled=False,
+        arm_file=arm_file,
+        enable_file=enable_file,
+        stock_detector=lambda: False,
+        socket_factory=factory,
+        period_seconds=0.04,
+        poll_seconds=0.002,
+    )
+    transmitter.start()
+    try:
+        wait_for(lambda: transmitter.snapshot().armed)
+        time.sleep(0.03)
+        snapshot = transmitter.snapshot()
+        assert snapshot.feature_enabled is False
+        assert snapshot.owner is False
+        assert opened == []
+
+        enable_file.touch()
+        wait_for(lambda: opened and len(opened[0].frames) >= 2)
+        assert transmitter.snapshot().feature_enabled is True
+        assert transmitter.snapshot().owner is True
+
+        enable_file.unlink()
+        wait_for(lambda: not transmitter.snapshot().owner)
+        assert transmitter.snapshot().feature_enabled is False
+        sent = len(opened[0].frames)
+        time.sleep(0.06)
+        assert len(opened[0].frames) == sent
+    finally:
+        transmitter.stop()
+    assert len(opened) == 1
+
+
+def test_socket_open_failure_is_counted_not_fatal(tmp_path: Path):
+    arm_file = tmp_path / "tx-armed"
+    arm_file.touch()
+    attempts = {"count": 0}
+    fake_socket = FakeSocket()
+
+    def factory(_: str) -> FakeSocket:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise OSError("No such device")
+        return fake_socket
+
+    transmitter = KeepaliveTransmitter(
+        interface="can0",
+        feature_enabled=True,
+        arm_file=arm_file,
+        stock_detector=lambda: False,
+        socket_factory=factory,
+        period_seconds=0.04,
+        poll_seconds=0.002,
+    )
+    transmitter.start()
+    try:
+        wait_for(lambda: len(fake_socket.frames) >= 2)
+        snapshot = transmitter.snapshot()
+        assert snapshot.tx_errors == 1
+        assert snapshot.last_error == ""
+    finally:
+        transmitter.stop()
