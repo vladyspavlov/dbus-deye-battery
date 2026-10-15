@@ -300,8 +300,8 @@ def validate(paths: Iterable[Path], *, capacity_ah: float = 230.0) -> dict[str, 
             f"DCL range={min(raw_dcl, default=None)}..{max(raw_dcl, default=None)} A",
         ),
         _check(
-            "Deye nominal capacity is consistently 230 Ah",
-            capacities == {230.0},
+            f"Deye nominal capacity is consistently {capacity_ah:g} Ah",
+            capacities == {capacity_ah},
             f"observed={sorted(capacities)}",
         ),
         _check(
@@ -316,8 +316,8 @@ def validate(paths: Iterable[Path], *, capacity_ah: float = 230.0) -> dict[str, 
         ),
         _check(
             "capacity and unavailable cell IDs map to Victron D-Bus semantics",
-            final_paths.get("/InstalledCapacity") == 230.0
-            and final_paths.get("/Capacity") == 230.0
+            final_paths.get("/InstalledCapacity") == capacity_ah
+            and final_paths.get("/Capacity") == capacity_ah
             and final_paths.get("/System/MaxVoltageCellId") is None
             and final_paths.get("/System/MinVoltageCellId") is None,
             "Installed/Capacity="
@@ -415,7 +415,12 @@ def default_paths() -> list[Path]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("paths", nargs="*", type=Path)
-    parser.add_argument("--capacity-ah", type=float, default=230.0)
+    parser.add_argument(
+        "--capacity-ah",
+        type=float,
+        default=230.0,
+        help="nominal capacity the pack is expected to report (default 230)",
+    )
     parser.add_argument("--compact", action="store_true")
     arguments = parser.parse_args(argv)
     paths = arguments.paths or default_paths()
