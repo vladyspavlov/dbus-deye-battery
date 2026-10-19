@@ -9,7 +9,7 @@ convention is supplied by :mod:`deye_virtual_battery.profile`.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable
 
 from .candump import CanFrame
@@ -234,6 +234,33 @@ VICTRON_ALARM_PATHS: dict[str, tuple[str, int]] = {
 }
 
 
+#: Deye V3.3 numbers every per-pack frame ``base + (BmsAddr - 1)``; the
+#: ``0x35x``/``0x36x``/``0x371`` family describes the whole parallel bank.
+#: Pack 1 is the master wired to the PCS port and keeps the original field
+#: names, so a single pack decodes exactly as before.  Every pack, pack 1
+#: included, is also decoded under ``packs.<n>.`` for the bank aggregates.
+PER_PACK_BASE_IDS = (
+    0x110, 0x150, 0x200, 0x250, 0x400, 0x500, 0x550, 0x600, 0x650, 0x700, 0x750,
+)
+#: Packs decoded per bank.  32 keeps every family clear of its neighbour and
+#: of the system frames: the highest, 0x750 + 31, is 0x76F.
+MAX_PACKS = 32
+PACK_PREFIX = "packs."
+
+
+def pack_frame(can_id: int) -> tuple[int, int] | None:
+    """Return ``(base id, pack number)`` for a per-pack frame, else ``None``."""
+
+    for base in PER_PACK_BASE_IDS:
+        if base <= can_id < base + MAX_PACKS:
+            return base, can_id - base + 1
+    return None
+
+
+def pack_field_name(pack: int, name: str) -> str:
+    return f"{PACK_PREFIX}{pack}.{name}"
+
+
 def decode_victron_alarm_frame(payload: bytes) -> dict[str, str]:
     """Return the tri-state value of every 0x35A field."""
 
@@ -252,10 +279,9 @@ class DeyeDecoder:
     """
 
     BATTERY_IDS = {
-        0x110, 0x150, 0x200, 0x250, 0x351, 0x355, 0x356, 0x358, 0x359,
-        0x35A, 0x35C, 0x35E, 0x35F, 0x361, 0x363, 0x364, 0x371, 0x400,
-        0x500, 0x550, 0x600, 0x650, 0x700, 0x750,
-    }
+        0x351, 0x355, 0x356, 0x358, 0x359, 0x35A, 0x35C, 0x35E, 0x35F,
+        0x361, 0x363, 0x364, 0x371,
+    } | {base + offset for base in PER_PACK_BASE_IDS for offset in range(MAX_PACKS)}
     INVERTER_IDS = {0x305, 0x306, 0x307}
 
     def __init__(
@@ -280,14 +306,28 @@ class DeyeDecoder:
             return []
         if frame.can_id in self.INVERTER_IDS and frame.direction == "R":
             return []
-        handler = getattr(self, f"_decode_{frame.can_id:03x}", None)
+        per_pack = pack_frame(frame.can_id)
+        base_id = per_pack[0] if per_pack else frame.can_id
+        handler = getattr(self, f"_decode_{base_id:03x}", None)
         if handler is None:
             return []
         if frame.dlc != 8:
             raise DecodeError(
                 f"0x{frame.can_id:03X}: expected DLC 8, received {frame.dlc}"
             )
-        return handler(frame)
+        if per_pack is None:
+            return handler(frame)
+        pack = per_pack[1]
+        # Decode with the base layout, then name every field after its pack.
+        # The source id stays the real one so diagnostics show 0x111, not 0x110.
+        fields = handler(replace(frame, can_id=base_id))
+        mirrored = [
+            replace(item, name=pack_field_name(pack, item.name), source_can_id=frame.can_id)
+            for item in fields
+        ]
+        if pack == 1:
+            return fields + mirrored
+        return mirrored
 
     def _decode_305(self, frame: CanFrame) -> list[DecodedField]:
         expected = frame.payload == bytes(8)

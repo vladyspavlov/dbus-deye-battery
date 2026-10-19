@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any
 
-from .decoder import VICTRON_ALARM_ACTIVE, VICTRON_ALARM_PATHS
+from .decoder import VICTRON_ALARM_ACTIVE, VICTRON_ALARM_PATHS, pack_field_name
 from .profile import UNKNOWN, VICTRON_CAN
 
 
@@ -370,14 +370,22 @@ def evaluate_policy(
     raw_dcl = _number(fields, "limits.max_discharge_current")
     array_ccl = _number(fields, "limits.array_max_charge_current")
     array_dcl = _number(fields, "limits.array_max_discharge_current")
-    charge_mos = _effective(fields, "mos.charge_closed")
-    discharge_mos = _effective(fields, "mos.discharge_closed")
+    # In a parallel bank the charge path is open while any pack's charge MOS
+    # is closed: the master already builds 0x351 from the packs that accept
+    # charge.  Pack 1's own MOS is the answer only when it is the only pack.
+    charge_mos = _bank_or_pack(fields, "bank.charge_mos_closed", "mos.charge_closed")
+    discharge_mos = _bank_or_pack(
+        fields, "bank.discharge_mos_closed", "mos.discharge_closed"
+    )
 
+    # Every pack's condition tables, not only pack 1's: a fault on another
+    # pack must raise the same alarm.
     conditions = set(
         set(_string_list(fields, "pack.active_v33_conditions"))
+        | set(_string_list(fields, "bank.active_pack_conditions"))
         | set(_string_list(fields, "alarms.active_v33_conditions"))
     )
-    fault_level = _effective(fields, "system.fault_level")
+    fault_level = _bank_or_pack(fields, "bank.fault_level", "system.fault_level")
     if fault_level == "minor":
         conditions.add("system_minor_fault")
     elif fault_level == "major":
@@ -479,14 +487,23 @@ def evaluate_policy(
     # victronCAN profile stops sending the 0x371 array limits, so it is applied
     # restrictively to charge only.  It must never reduce the discharge limit:
     # a stale low value there could stop an islanded Multi.
-    pack_allowable_ccl = _number(fields, "pack.maximum_allowable_charge_current")
-    # 0x250 is quantized to whole amps while 0x351 and 0x371 carry 0.1 A, so a
-    # reported 55 A can mean anything up to 56 A.  Applying its ceiling keeps
-    # the cross-check protective against a genuinely lower pack limit without
-    # shaving a normal limit down by the quantization step.
-    pack_allowable_ccl_ceiling = (
-        pack_allowable_ccl + 1.0 if pack_allowable_ccl is not None else None
-    )
+    #
+    # 0x250 describes one pack.  In a parallel bank the cross-check uses the
+    # sum over the packs that accept charge (see packs.BankView); applying
+    # pack 1's own figure capped a two-pack bank near one pack's share.
+    if "bank.pack_allowable_ccl" in fields:
+        pack_allowable_ccl = _number(fields, "bank.pack_allowable_ccl")
+        pack_allowable_ccl_ceiling = _number(fields, "bank.pack_allowable_ccl_ceiling")
+    else:
+        pack_allowable_ccl = _number(fields, "pack.maximum_allowable_charge_current")
+        # 0x250 is quantized to whole amps while 0x351 and 0x371 carry 0.1 A,
+        # so a reported 55 A can mean anything up to 56 A.  Applying its
+        # ceiling keeps the cross-check protective against a genuinely lower
+        # pack limit without shaving a normal limit down by the quantization
+        # step.
+        pack_allowable_ccl_ceiling = (
+            pack_allowable_ccl + 1.0 if pack_allowable_ccl is not None else None
+        )
     if critical_ready:
         assert raw_ccl is not None and raw_dcl is not None
         assert raw_cvl is not None and pack_voltage is not None
@@ -525,27 +542,21 @@ def evaluate_policy(
         (UNMAPPED_CONDITION_SEVERITIES.get(name, 1) for name in unmapped_conditions),
         default=0,
     )
-    active_set = set(conditions)
-    uncoordinated_protections = set(
-        active_set & NO_DIRECTIONAL_STOP_PROTECTION_CONDITIONS
-    )
-    if (
-        active_set & (CHARGE_STOP_CONDITIONS | BOTH_STOP_CONDITIONS)
-        and isinstance(raw_ccl, (int, float))
-        and raw_ccl > 0
-        and charge_mos is True
+    # A protection is coordinated when the MOS it concerns is open.  In a
+    # parallel bank that is the reporting pack's own MOS: a full pack in
+    # over-voltage protection with its charge MOS open is coordinated while the
+    # other packs keep charging.  The 0x359 system tables are the bank's and
+    # are judged against the bank MOS state.
+    uncoordinated_protections: set[str] = set()
+    for group_conditions, group_charge_mos, group_discharge_mos in _protection_groups(
+        fields, conditions, charge_mos, discharge_mos
     ):
-        uncoordinated_protections.update(
-            active_set & (CHARGE_STOP_CONDITIONS | BOTH_STOP_CONDITIONS)
-        )
-    if (
-        active_set & (DISCHARGE_STOP_CONDITIONS | BOTH_STOP_CONDITIONS)
-        and isinstance(raw_dcl, (int, float))
-        and raw_dcl > 0
-        and discharge_mos is True
-    ):
-        uncoordinated_protections.update(
-            active_set & (DISCHARGE_STOP_CONDITIONS | BOTH_STOP_CONDITIONS)
+        uncoordinated_protections |= _uncoordinated(
+            group_conditions,
+            raw_ccl=raw_ccl,
+            raw_dcl=raw_dcl,
+            charge_mos=group_charge_mos,
+            discharge_mos=group_discharge_mos,
         )
     uncoordinated_protections = sorted(uncoordinated_protections)
     custom_alarms = {
@@ -653,11 +664,81 @@ def evaluate_policy(
             "current_sign_convention_conflict": sign_conflict,
             "array_limits_available": array_ccl is not None and array_dcl is not None,
             "pack_allowable_ccl_applied": pack_allowable_ccl is not None,
+            "pack_count": _effective(fields, "bank.pack_count"),
+            "packs_online": _effective(fields, "bank.packs_online"),
+            "bank_complete": _effective(fields, "bank.complete"),
             "provisional_charge_ceiling_v": config.provisional_charge_ceiling_v,
             "blocked_charge_cvl_v": config.blocked_charge_cvl_v,
             "alarm_flags_affect_directional_limits": False,
         },
     }
+
+
+def _fault_conditions(level: Any) -> set[str]:
+    if level == "minor":
+        return {"system_minor_fault"}
+    if level == "major":
+        return {"system_major_fault"}
+    return set()
+
+
+def _protection_groups(
+    fields: dict[str, Any],
+    conditions: list[str],
+    charge_mos: Any,
+    discharge_mos: Any,
+) -> list[tuple[set[str], Any, Any]]:
+    """Pair each set of active conditions with the MOS state that answers it."""
+
+    online = _effective(fields, "bank.packs_online")
+    if not isinstance(online, list):
+        return [(set(conditions), charge_mos, discharge_mos)]
+    groups = [
+        (
+            set(_string_list(fields, "alarms.active_v33_conditions")),
+            charge_mos,
+            discharge_mos,
+        )
+    ]
+    for pack in online:
+        prefix = pack_field_name(pack, "")
+        groups.append(
+            (
+                set(_string_list(fields, f"{prefix}pack.active_v33_conditions"))
+                | _fault_conditions(_effective(fields, f"{prefix}system.fault_level")),
+                _effective(fields, f"{prefix}mos.charge_closed"),
+                _effective(fields, f"{prefix}mos.discharge_closed"),
+            )
+        )
+    return groups
+
+
+def _uncoordinated(
+    active: set[str],
+    *,
+    raw_ccl: Any,
+    raw_dcl: Any,
+    charge_mos: Any,
+    discharge_mos: Any,
+) -> set[str]:
+    found = set(active & NO_DIRECTIONAL_STOP_PROTECTION_CONDITIONS)
+    charge_stops = active & (CHARGE_STOP_CONDITIONS | BOTH_STOP_CONDITIONS)
+    if (
+        charge_stops
+        and isinstance(raw_ccl, (int, float))
+        and raw_ccl > 0
+        and charge_mos is True
+    ):
+        found |= charge_stops
+    discharge_stops = active & (DISCHARGE_STOP_CONDITIONS | BOTH_STOP_CONDITIONS)
+    if (
+        discharge_stops
+        and isinstance(raw_dcl, (int, float))
+        and raw_dcl > 0
+        and discharge_mos is True
+    ):
+        found |= discharge_stops
+    return found
 
 
 def _effective(fields: dict[str, Any], name: str) -> Any:
@@ -670,6 +751,14 @@ def _effective(fields: dict[str, Any], name: str) -> Any:
 def _number(fields: dict[str, Any], name: str) -> float | None:
     value = _effective(fields, name)
     return float(value) if isinstance(value, (int, float)) else None
+
+
+def _bank_or_pack(fields: dict[str, Any], bank: str, pack: str) -> Any:
+    """Prefer the bank aggregate; fall back to pack 1 when none is derived."""
+
+    if bank in fields:
+        return _effective(fields, bank)
+    return _effective(fields, pack)
 
 
 def _string_list(fields: dict[str, Any], name: str) -> list[str]:

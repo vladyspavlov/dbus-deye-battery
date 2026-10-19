@@ -15,6 +15,7 @@ from .profile import (
     VICTRON_CAN,
     ProtocolProfileDetector,
 )
+from .packs import PACK_FIELD, BankView, bank_snapshot_fields
 
 
 #: Fields whose source frames the named profile does not transmit.  They go
@@ -178,6 +179,19 @@ SIGN_CROSSCHECK_MINIMUM_A = 1.0
 #: withdrawn.  At the observed one-second cadence this is a few seconds.
 SIGN_CROSSCHECK_DISAGREEMENTS = 5
 
+#: Field changes recorded in the protocol event log, for every pack.
+TRACKED_TRANSITIONS = frozenset(
+    {
+        "limits.max_charge_current",
+        "limits.array_max_charge_current",
+        "mos.charge_closed",
+        "mos.discharge_closed",
+        "system.operation_mode_code",
+        "system.fault_level_code",
+        "system.substate_raw",
+    }
+)
+
 
 @dataclass(slots=True)
 class VirtualBatteryCache:
@@ -309,16 +323,10 @@ class VirtualBatteryCache:
         if previous == current:
             return
 
-        tracked = {
-            "limits.max_charge_current",
-            "limits.array_max_charge_current",
-            "mos.charge_closed",
-            "mos.discharge_closed",
-            "system.operation_mode_code",
-            "system.fault_level_code",
-            "system.substate_raw",
-        }
-        if decoded.name in tracked:
+        # Pack 1 is already logged under its original names; its packs.1.
+        # mirror would only duplicate every event.
+        base_name = PACK_FIELD.sub("", decoded.name)
+        if base_name in TRACKED_TRANSITIONS and not decoded.name.startswith("packs.1."):
             self._add_protocol_event(
                 timestamp,
                 decoded.name,
@@ -337,7 +345,7 @@ class VirtualBatteryCache:
 
         if previous <= 0 < current:
             self.positive_ccl_started[decoded.name] = (timestamp, float(current))
-            charge_mos = self._fresh_cached_value("mos.charge_closed", timestamp)
+            charge_mos = self._bank(timestamp).charge_mos_closed()
             if charge_mos is False:
                 self._add_anomaly(
                     timestamp,
@@ -355,7 +363,7 @@ class VirtualBatteryCache:
             started_at, peak = started
             duration = timestamp - started_at
             raw_current = self._fresh_cached_value("battery.current_raw_deye", timestamp)
-            charge_mos = self._fresh_cached_value("mos.charge_closed", timestamp)
+            charge_mos = self._bank(timestamp).charge_mos_closed()
             if (
                 duration <= 10
                 and isinstance(raw_current, (int, float))
@@ -404,29 +412,34 @@ class VirtualBatteryCache:
             self.sign_convention_conflict = False
 
     def _observe_current_sign(self, decoded: DecodedField, timestamp: float) -> None:
-        """Cross-check the profile-selected 0x356 sign against 0x150.
+        """Cross-check the profile-selected 0x356 sign against the packs.
 
         ``0x150`` keeps the Deye current convention in both profiles, so once
         both values are converted to Victron's convention they must agree.  A
         sustained contradiction means the profile classification is wrong;
         withdrawing the published current is safer than publishing a value
         whose direction may be inverted.
+
+        ``0x356`` is the bank current and each ``0x150``-family frame one
+        pack's, so the comparison is against the sum of every pack.  Parallel
+        packs can legitimately carry opposite currents -- the fuller one
+        feeding the emptier -- and comparing the bank with pack 1 alone would
+        read that as an inverted sign and inhibit charge.  An incomplete set
+        of fresh pack currents skips the sample.
         """
 
         if self.profile_detector.in_transition(timestamp):
             return
-        reference = self.fields.get("diagnostics.current_victron_150")
-        if (
-            reference is None
-            or reference.last_valid_timestamp is None
-            or timestamp - reference.last_valid_timestamp > TIMEOUTS[CRITICAL]
-        ):
+        observed = BankView(
+            self.fields,
+            lambda name: self._recent_value(name, timestamp, TIMEOUTS[CRITICAL]),
+        ).current_victron()
+        if observed is None:
             return
         factor = CURRENT_SIGN_FACTORS.get(self.profile_detector.resolve(timestamp))
         if factor is None or not isinstance(decoded.value, (int, float)):
             return
         published = decoded.value * factor
-        observed = reference.cached_value
         if not isinstance(published, (int, float)) or not isinstance(observed, (int, float)):
             return
         if (
@@ -465,6 +478,19 @@ class VirtualBatteryCache:
         if timeout is not None and timestamp - state.last_valid_timestamp > timeout:
             return None
         return state.cached_value
+
+    def _recent_value(self, name: str, timestamp: float, max_age: float | None) -> Any:
+        state = self.fields.get(name)
+        if state is None or state.last_valid_timestamp is None:
+            return None
+        if max_age is not None and timestamp - state.last_valid_timestamp > max_age:
+            return None
+        return state.cached_value
+
+    def _bank(self, timestamp: float) -> BankView:
+        return BankView(
+            self.fields, lambda name: self._fresh_cached_value(name, timestamp)
+        )
 
     def _add_protocol_event(
         self,
@@ -553,6 +579,7 @@ class VirtualBatteryCache:
             name: state.snapshot(reference) for name, state in sorted(self.fields.items())
         }
         field_snapshots.update(self._derived_fields(field_snapshots, reference))
+        field_snapshots.update(bank_snapshot_fields(field_snapshots))
         field_snapshots = dict(sorted(field_snapshots.items()))
         return {
             "mode": "pc-only-shadow",
@@ -657,10 +684,14 @@ class VirtualBatteryCache:
     ) -> dict[str, Any]:
         profile = self.profile_detector.resolve(reference)
         inactive = INACTIVE_PROFILE_FIELDS.get(profile, frozenset())
+        # A pack that has left the bank is reported once, under
+        # stale_packs, rather than as every one of its fields.
         critical_stale = [
             name
             for name, value in fields.items()
-            if value["category"] == CRITICAL and not value["usable"]
+            if value["category"] == CRITICAL
+            and not value["usable"]
+            and not name.startswith("packs.")
         ]
         # Frames the other profile owns are absent by design, not by fault.
         critical_stale_active_profile = [
@@ -673,7 +704,12 @@ class VirtualBatteryCache:
         voltage = _effective(fields, "battery.voltage")
         voltage_150 = _effective(fields, "diagnostics.voltage_150")
         current = _effective(fields, "battery.current")
-        current_150 = _effective(fields, "diagnostics.current_victron_150")
+        # The bank current is compared with the sum of the packs' own.
+        current_150 = (
+            _effective(fields, "bank.current_victron")
+            if "bank.current_victron" in fields
+            else _effective(fields, "diagnostics.current_victron_150")
+        )
         voltage_delta = (
             round(abs(voltage - voltage_150), 3)
             if isinstance(voltage, (int, float)) and isinstance(voltage_150, (int, float))
@@ -696,8 +732,12 @@ class VirtualBatteryCache:
         # Use the profile-corrected Victron-convention current: the raw 0x356
         # wire sign means the opposite thing in the two battery profiles.
         measured_current = _effective(fields, "battery.current")
-        charge_mos_closed = _effective(fields, "mos.charge_closed")
-        discharge_mos_closed = _effective(fields, "mos.discharge_closed")
+        charge_mos_closed = _bank_or_pack(fields, "bank.charge_mos_closed", "mos.charge_closed")
+        discharge_mos_closed = _bank_or_pack(
+            fields, "bank.discharge_mos_closed", "mos.discharge_closed"
+        )
+        pack_count = _effective(fields, "bank.pack_count")
+        modules_for_bank = pack_count if isinstance(pack_count, int) and pack_count > 0 else 1
         ccl = _effective(fields, "limits.max_charge_current")
         array_ccl = _effective(fields, "limits.array_max_charge_current")
         request_charge_enable = _effective(fields, "requests.charge_enable_v33")
@@ -724,8 +764,11 @@ class VirtualBatteryCache:
             (
                 request_charge_enable is False and charge_mos_closed is True,
                 request_charge_enable is False and isinstance(ccl, (int, float)) and ccl > 0,
+                # In a parallel bank one pack blocking charge while another
+                # accepts it is normal; only every pack blocking contradicts
+                # a closed bank charge path.
                 isinstance(module_charge_disabled, (int, float))
-                and module_charge_disabled > 0
+                and module_charge_disabled >= modules_for_bank
                 and charge_mos_closed is True,
             )
         )
@@ -768,10 +811,16 @@ class VirtualBatteryCache:
             "v33_charge_enable_summary": request_charge_enable,
             "charge_disabled_module_count": module_charge_disabled,
             "charge_signal_disagreement": charge_signal_disagreement,
-            "v33_pack_condition_active": bool(_effective(fields, "pack.any_v33_condition_active") or False),
+            "v33_pack_condition_active": bool(
+                _effective(fields, "pack.any_v33_condition_active")
+                or _effective(fields, "bank.active_pack_conditions")
+            ),
+            "pack_count": pack_count,
+            "packs_online": _effective(fields, "bank.packs_online") or [],
+            "stale_packs": _effective(fields, "bank.packs_missing") or [],
             "v33_system_condition_active": bool(_effective(fields, "alarms.any_v33_condition_active") or False),
             "system_operation_mode": _effective(fields, "system.operation_mode"),
-            "system_fault_level": _effective(fields, "system.fault_level"),
+            "system_fault_level": _bank_or_pack(fields, "bank.fault_level", "system.fault_level"),
             "system_substate_raw": _effective(fields, "system.substate_raw"),
             "soc_observation": soc_observation,
             "fresh_305_request": _effective(fields, "transport.request_305_seen") is True,
@@ -790,3 +839,11 @@ class VirtualBatteryCache:
 def _effective(fields: dict[str, dict[str, Any]], name: str) -> Any:
     state = fields.get(name)
     return state["effective_value"] if state else None
+
+
+def _bank_or_pack(fields: dict[str, dict[str, Any]], bank: str, pack: str) -> Any:
+    """Prefer the bank aggregate; fall back to pack 1 when none is derived."""
+
+    if bank in fields:
+        return _effective(fields, bank)
+    return _effective(fields, pack)

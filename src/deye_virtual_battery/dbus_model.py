@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .decoder import MAX_PACKS, pack_field_name
 from .version import VERSION
 from .policy import PolicyConfig, evaluate_policy
 
@@ -49,6 +50,12 @@ def build_mock_dbus_model(
         if online_capacity is not None and soc is not None
         else None
     )
+    # 0x35E already carries the bank's nominal capacity -- two 100 Ah packs
+    # report 200 Ah -- so capacity is never summed again here.  What the GUI
+    # needs from this driver is how many packs make up that bank.
+    pack_count = _effective(fields, "bank.pack_count")
+    batteries = pack_count if isinstance(pack_count, int) and pack_count > 0 else 1
+    balancing = _effective(fields, "bank.balancing")
     paths: dict[str, Any] = {
         "/Mgmt/ProcessName": "deye-virtual-battery-shadow",
         "/Mgmt/ProcessVersion": f"{VERSION}-shadow",
@@ -77,8 +84,13 @@ def build_mock_dbus_model(
         "/Info/BatteryLowVoltage": limits["battery_low_voltage_v"] if ready else None,
         "/Io/AllowToCharge": int(bool(permissions["allow_charge"])) if ready else None,
         "/Io/AllowToDischarge": int(bool(permissions["allow_discharge"])) if ready else None,
-        "/System/NrOfCellsPerBattery": 16,
-        "/System/NrOfBatteries": 1,
+        "/System/NrOfCellsPerBattery": config.for_pack(fields).cell_count,
+        # gui-v2 shows a battery's "System" page (batteries, parallel, series,
+        # cells per battery) whenever /System/NrOfBatteries is valid.
+        "/System/NrOfBatteries": batteries,
+        "/System/BatteriesParallel": batteries,
+        "/System/BatteriesSeries": 1,
+        "/Balancing": int(balancing) if isinstance(balancing, bool) and ready else None,
         "/System/NrOfModulesOnline": (
             _effective(fields, "modules.normal") if ready else None
         ),
@@ -110,13 +122,19 @@ def build_mock_dbus_model(
         "/System/MaxTemperatureCellId": None,
         "/System/MinTemperatureCellId": None,
         "/History/ChargedEnergy": (
-            _effective(fields, "history.charged_energy") if ready else None
+            _bank_or_pack(fields, "bank.charged_energy", "history.charged_energy")
+            if ready
+            else None
         ),
         "/History/DischargedEnergy": (
-            _effective(fields, "history.discharged_energy") if ready else None
+            _bank_or_pack(fields, "bank.discharged_energy", "history.discharged_energy")
+            if ready
+            else None
         ),
         "/History/ChargeCycles": (
-            _effective(fields, "battery.cycle_count") if ready else None
+            _bank_or_pack(fields, "bank.cycle_count", "battery.cycle_count")
+            if ready
+            else None
         ),
         "/Diagnostics/Policy/ProductionControlAllowed": 0,
         "/Diagnostics/Policy/WritesVebusMode": 0,
@@ -178,6 +196,13 @@ def build_mock_dbus_model(
             "victron_system_status_raw"
         ],
     }
+    paths["/Diagnostics/Bank/PackCount"] = pack_count
+    paths["/Diagnostics/Bank/PacksOnline"] = len(_effective(fields, "bank.packs_online") or ())
+    paths["/Diagnostics/Bank/Complete"] = _flag(_effective(fields, "bank.complete"))
+    paths["/Diagnostics/Bank/ChargeMosClosed"] = _flag(
+        _effective(fields, "bank.charge_mos_closed")
+    )
+    paths.update(pack_paths(fields, ready=ready))
     paths.update(policy["standard_alarms"])
     paths.update(policy["custom_alarms"])
     return {
@@ -190,12 +215,75 @@ def build_mock_dbus_model(
     }
 
 
+#: Per-pack paths, registered for every possible pack because a Venus service
+#: registers its paths once.  Unused slots stay invalid.
+PACK_PATH_FIELDS: tuple[tuple[str, str], ...] = (
+    ("/Battery/{n}/Voltage", "diagnostics.voltage_150"),
+    ("/Battery/{n}/Current", "diagnostics.current_victron_150"),
+    ("/Battery/{n}/Soc", "diagnostics.soc_150"),
+    ("/Battery/{n}/Temperature", "cells.max_temperature_200"),
+    ("/Diagnostics/Pack/{n}/AllowableChargeCurrent", "pack.maximum_allowable_charge_current"),
+    ("/Diagnostics/Pack/{n}/AllowableDischargeCurrent", "pack.maximum_allowable_discharge_current"),
+    ("/Diagnostics/Pack/{n}/MaxCellVoltage", "cells.max_voltage_200"),
+    ("/Diagnostics/Pack/{n}/MinCellVoltage", "cells.min_voltage_200"),
+)
+
+
+def pack_paths(fields: dict[str, Any], *, ready: bool = True) -> dict[str, Any]:
+    """Publish each pack of a parallel bank on its own.
+
+    gui-v2's "Individual battery info" page reads ``/Battery/<n>/...`` for the
+    pack selected through the writable ``/Battery/Request/Id``, which the
+    publisher registers.  Values come from that pack's own frames
+    (``0x150 + n - 1`` and so on); the Deye protocol carries no per-cell data,
+    only each pack's extremes, which are published as diagnostics.
+    """
+
+    paths: dict[str, Any] = {}
+    seen = set(_effective(fields, "bank.packs_seen") or ())
+    for pack in range(1, MAX_PACKS + 1):
+        # A pack is online while its 0x110-family frame is fresh.  Its other
+        # frames stay cached for minutes, so an offline pack publishes
+        # nothing rather than its last readings.
+        online = ready and _effective(fields, pack_field_name(pack, "mos.raw_flags")) is not None
+
+        def value(name: str) -> Any:
+            return _effective(fields, pack_field_name(pack, name)) if online else None
+
+        for template, name in PACK_PATH_FIELDS:
+            paths[template.format(n=pack)] = value(name)
+        paths[f"/Battery/{pack}/Serial"] = (
+            serial_number(fields, prefix=pack_field_name(pack, "")) if online else None
+        )
+        # Invalid for a slot no pack has used; 0 for a pack that went silent.
+        paths[f"/Diagnostics/Pack/{pack}/Online"] = (
+            int(online) if ready and pack in seen else None
+        )
+        paths[f"/Diagnostics/Pack/{pack}/ChargeMosClosed"] = _flag(value("mos.charge_closed"))
+        paths[f"/Diagnostics/Pack/{pack}/DischargeMosClosed"] = _flag(
+            value("mos.discharge_closed")
+        )
+    return paths
+
+
+def _flag(value: Any) -> int | None:
+    return int(value) if isinstance(value, bool) else None
+
+
+def _bank_or_pack(fields: dict[str, Any], bank: str, pack: str) -> Any:
+    """Prefer the bank aggregate; fall back to pack 1 when none is derived."""
+
+    if bank in fields:
+        return _effective(fields, bank)
+    return _effective(fields, pack)
+
+
 def _profile_value(snapshot: dict[str, Any], key: str) -> Any:
     profile = snapshot.get("protocol_profile")
     return profile.get(key) if isinstance(profile, dict) else None
 
 
-def serial_number(fields: dict[str, Any]) -> str | None:
+def serial_number(fields: dict[str, Any], *, prefix: str = "") -> str | None:
     """Join the pack serial, which arrives split across two CAN frames.
 
     ``0x600`` carries the first eight characters and ``0x650`` the second
@@ -205,8 +293,8 @@ def serial_number(fields: dict[str, Any]) -> str | None:
 
     Returned as ``None`` -- Venus's invalid value -- until both are present.
     """
-    first = _effective(fields, "identity.serial_first_half")
-    second = _effective(fields, "identity.serial_second_half")
+    first = _effective(fields, f"{prefix}identity.serial_first_half")
+    second = _effective(fields, f"{prefix}identity.serial_second_half")
     if not isinstance(first, str) or not isinstance(second, str):
         return None
     # Vendors pad short serials; NULs cannot appear here because the decoder

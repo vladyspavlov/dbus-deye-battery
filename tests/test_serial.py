@@ -159,7 +159,7 @@ def test_serial_is_registered_once_and_never_rewritten():
         def __init__(self):
             self.paths = {}
 
-        def add_path(self, path, value):
+        def add_path(self, path, value, **_):
             self.paths[path] = value
 
     service = FakeService()

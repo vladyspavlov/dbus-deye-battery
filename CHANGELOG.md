@@ -3,6 +3,60 @@
 Versions are strictly numeric: Venus OS and VRM display `/Mgmt/ProcessVersion`
 verbatim, so no suffixes or build tags appear here.
 
+## 0.8.0
+
+Multi-pack support. Deye packs linked by their parallel cable present one bank
+on the master's PCS port; until now the driver read only pack 1's frames and
+treated them as the whole bank.
+
+### Fixed
+- **A full pack blocked charging of the whole bank**
+  ([#6](https://github.com/vladyspavlov/dbus-deye-battery/issues/6)). With two
+  SE-F5 Pro-C in parallel, pack 1 at 97.6 % opened its charge MOS while pack 2
+  at 90.5 % kept accepting charge, and the bank asked for 45 A in `0x351`. The
+  driver saw only pack 1's MOS and published CCL 0 A. Charge is now allowed
+  while any pack's charge MOS is closed, and blocked only when every pack
+  blocks it. A single pack behaves exactly as before.
+- **The pack charge ceiling capped a bank at one pack's share.** The `0x250`
+  cross-check applied pack 1's own allowable current to the whole bank (18 A
+  + 1 in that capture, against 45 A requested). It is now the sum over the
+  packs that accept charge, and is skipped while a pack's frames are missing.
+  The bank's `0x351` request is still never exceeded.
+- **The current-sign cross-check could inhibit charge on a healthy bank.** It
+  compared the bank current in `0x356` with pack 1's current alone; parallel
+  packs can legitimately carry opposite currents. It now compares with the sum
+  of every pack.
+- **Faults on any pack other than pack 1 raised no alarm** from the per-pack
+  condition tables or `0x400` fault level. Every pack's conditions now map to
+  Venus alarms, and the worst pack's fault level is the bank's.
+- Charged/discharged energy and the cycle count showed pack 1 only. Energy is
+  now summed across packs; the cycle count is the most-cycled pack's.
+- `/System/NrOfCellsPerBattery` was a hard-coded 16; it is now the measured
+  series count.
+
+### Added
+- Every per-pack frame (`0x110`, `0x150`, `0x200`, `0x250`, `0x400`, `0x500`,
+  `0x550`, `0x600`, `0x650`, `0x700`, `0x750` + pack − 1, up to 32 packs) is
+  decoded under `packs.<n>.`. Pack 1 keeps its original field names.
+- `/System/NrOfBatteries` and `/System/BatteriesParallel` publish the number of
+  packs, and `/System/BatteriesSeries` is 1, so the battery's **System** page
+  in the GX shows the bank layout. `/Balancing` reports whether any pack is
+  balancing.
+- `/Battery/<n>/Voltage`, `Current`, `Soc`, `Temperature` and `Serial` for each
+  pack, with a writable `/Battery/Request/Id` so gui-v2's **Individual battery
+  info** page can switch between packs. It only selects what is displayed.
+- `/Diagnostics/Pack/<n>/` (online, charge/discharge MOS, allowable currents,
+  cell extremes) and `/Diagnostics/Bank/` (pack count, packs online, whether the
+  bank is complete, bank charge MOS).
+- Per-pack serials are redacted from offline tool output like the bank serial.
+
+### Unchanged
+- Capacity is the bank's, straight from `0x35E` (two 100 Ah packs report
+  200 Ah); it is not summed again.
+- Replays of the reference SE-F12-C and SE-G5.1 Pro B captures, in both
+  battery protocol profiles, publish the same values and take the same
+  decisions as 0.7.10; only the new paths are added.
+
 ## 0.7.10
 
 ### Fixed

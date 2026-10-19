@@ -393,8 +393,9 @@ class StatefulShadow:
 
     @staticmethod
     def _invalidate_consumer_paths(paths: dict[str, Any]) -> None:
-        prefixes = ("/Dc/", "/Info/", "/Io/")
+        prefixes = ("/Dc/", "/Info/", "/Io/", "/Battery/")
         exact = {
+            "/Balancing",
             "/Soc",
             "/Soh",
             "/Capacity",
