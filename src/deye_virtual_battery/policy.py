@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any
 
-from .decoder import VICTRON_ALARM_ACTIVE, VICTRON_ALARM_PATHS
+from .decoder import VICTRON_ALARM_ACTIVE, VICTRON_ALARM_PATHS, pack_field_name
 from .profile import UNKNOWN, VICTRON_CAN
 
 
@@ -542,27 +542,21 @@ def evaluate_policy(
         (UNMAPPED_CONDITION_SEVERITIES.get(name, 1) for name in unmapped_conditions),
         default=0,
     )
-    active_set = set(conditions)
-    uncoordinated_protections = set(
-        active_set & NO_DIRECTIONAL_STOP_PROTECTION_CONDITIONS
-    )
-    if (
-        active_set & (CHARGE_STOP_CONDITIONS | BOTH_STOP_CONDITIONS)
-        and isinstance(raw_ccl, (int, float))
-        and raw_ccl > 0
-        and charge_mos is True
+    # A protection is coordinated when the MOS it concerns is open.  In a
+    # parallel bank that is the reporting pack's own MOS: a full pack in
+    # over-voltage protection with its charge MOS open is coordinated while the
+    # other packs keep charging.  The 0x359 system tables are the bank's and
+    # are judged against the bank MOS state.
+    uncoordinated_protections: set[str] = set()
+    for group_conditions, group_charge_mos, group_discharge_mos in _protection_groups(
+        fields, conditions, charge_mos, discharge_mos
     ):
-        uncoordinated_protections.update(
-            active_set & (CHARGE_STOP_CONDITIONS | BOTH_STOP_CONDITIONS)
-        )
-    if (
-        active_set & (DISCHARGE_STOP_CONDITIONS | BOTH_STOP_CONDITIONS)
-        and isinstance(raw_dcl, (int, float))
-        and raw_dcl > 0
-        and discharge_mos is True
-    ):
-        uncoordinated_protections.update(
-            active_set & (DISCHARGE_STOP_CONDITIONS | BOTH_STOP_CONDITIONS)
+        uncoordinated_protections |= _uncoordinated(
+            group_conditions,
+            raw_ccl=raw_ccl,
+            raw_dcl=raw_dcl,
+            charge_mos=group_charge_mos,
+            discharge_mos=group_discharge_mos,
         )
     uncoordinated_protections = sorted(uncoordinated_protections)
     custom_alarms = {
@@ -678,6 +672,73 @@ def evaluate_policy(
             "alarm_flags_affect_directional_limits": False,
         },
     }
+
+
+def _fault_conditions(level: Any) -> set[str]:
+    if level == "minor":
+        return {"system_minor_fault"}
+    if level == "major":
+        return {"system_major_fault"}
+    return set()
+
+
+def _protection_groups(
+    fields: dict[str, Any],
+    conditions: list[str],
+    charge_mos: Any,
+    discharge_mos: Any,
+) -> list[tuple[set[str], Any, Any]]:
+    """Pair each set of active conditions with the MOS state that answers it."""
+
+    online = _effective(fields, "bank.packs_online")
+    if not isinstance(online, list):
+        return [(set(conditions), charge_mos, discharge_mos)]
+    groups = [
+        (
+            set(_string_list(fields, "alarms.active_v33_conditions")),
+            charge_mos,
+            discharge_mos,
+        )
+    ]
+    for pack in online:
+        prefix = pack_field_name(pack, "")
+        groups.append(
+            (
+                set(_string_list(fields, f"{prefix}pack.active_v33_conditions"))
+                | _fault_conditions(_effective(fields, f"{prefix}system.fault_level")),
+                _effective(fields, f"{prefix}mos.charge_closed"),
+                _effective(fields, f"{prefix}mos.discharge_closed"),
+            )
+        )
+    return groups
+
+
+def _uncoordinated(
+    active: set[str],
+    *,
+    raw_ccl: Any,
+    raw_dcl: Any,
+    charge_mos: Any,
+    discharge_mos: Any,
+) -> set[str]:
+    found = set(active & NO_DIRECTIONAL_STOP_PROTECTION_CONDITIONS)
+    charge_stops = active & (CHARGE_STOP_CONDITIONS | BOTH_STOP_CONDITIONS)
+    if (
+        charge_stops
+        and isinstance(raw_ccl, (int, float))
+        and raw_ccl > 0
+        and charge_mos is True
+    ):
+        found |= charge_stops
+    discharge_stops = active & (DISCHARGE_STOP_CONDITIONS | BOTH_STOP_CONDITIONS)
+    if (
+        discharge_stops
+        and isinstance(raw_dcl, (int, float))
+        and raw_dcl > 0
+        and discharge_mos is True
+    ):
+        found |= discharge_stops
+    return found
 
 
 def _effective(fields: dict[str, Any], name: str) -> Any:

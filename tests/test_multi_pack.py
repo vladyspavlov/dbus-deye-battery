@@ -331,6 +331,25 @@ def test_a_condition_on_the_second_pack_raises_the_alarm():
     assert "cell_over_voltage" in policy["active_deye_conditions"]
 
 
+def test_a_full_pack_in_protection_with_its_mos_open_is_coordinated():
+    # Pack 1 is in cell over-voltage protection and has opened its own charge
+    # MOS; pack 2 keeps charging.  That is the protection working.
+    bank = issue_6_bank()
+    bank.packs[0].conditions = bytes([0x01, 0, 0, 0, 0, 0, 0])
+    policy = bank.policy()
+    assert policy["standard_alarms"]["/Alarms/HighCellVoltage"] == 2
+    assert policy["protections_without_directional_limit"] == []
+    assert policy["custom_alarms"]["/Diagnostics/Alarms/ProtectionWithoutDirectionalLimit"] == 0
+    assert policy["effective_limits"]["ccl_a"] == 45.0
+
+
+def test_a_pack_in_protection_with_its_mos_still_closed_is_flagged():
+    bank = issue_6_bank()
+    bank.packs[1].conditions = bytes([0x01, 0, 0, 0, 0, 0, 0])
+    policy = bank.policy()
+    assert policy["protections_without_directional_limit"] == ["cell_over_voltage"]
+
+
 def test_a_major_fault_on_the_second_pack_raises_internal_failure():
     bank = issue_6_bank()
     bank.packs[1].fault_level = 2
