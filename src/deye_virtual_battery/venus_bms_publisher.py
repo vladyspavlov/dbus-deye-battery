@@ -33,6 +33,7 @@ from .can_keepalive import (
     KeepaliveSnapshot,
     KeepaliveTransmitter,
 )
+from .decoder import MAX_PACKS
 from .policy import PolicyConfig
 from .venus_discovery import VebusLocator, read_vebus_voltage
 from .venus_instance import (
@@ -172,6 +173,21 @@ PUBLISHER_DYNAMIC_PATHS = {
     "/Diagnostics/Publisher/Heartbeat",
 }
 
+#: gui-v2 picks which pack its "Individual battery info" page shows by writing
+#: the pack number here, then reads /Battery/<n>/... for that pack.  It only
+#: selects what is displayed; nothing else reads it.
+BATTERY_REQUEST_PATH = "/Battery/Request/Id"
+
+
+def _accept_battery_request(_path: str, value: Any) -> bool:
+    """Accept a GUI pack selection; refuse anything that is not a pack."""
+    value = _unwrap(value)
+    return (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and 1 <= value <= MAX_PACKS
+    )
+
 
 def _tx_values(snapshot: KeepaliveSnapshot) -> dict[str, Any]:
     return {
@@ -307,6 +323,14 @@ def _add_paths(
     )
     for path, value in fixed.items():
         service.add_path(path, value)
+    # Writable and deliberately not dynamic: the update loop must never
+    # overwrite the pack the user picked.
+    service.add_path(
+        BATTERY_REQUEST_PATH,
+        1,
+        writeable=True,
+        onchangecallback=_accept_battery_request,
+    )
     dynamic_paths: set[str] = set()
     for path, value in sorted(initial.items()):
         if path in fixed:

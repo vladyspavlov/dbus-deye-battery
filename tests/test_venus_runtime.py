@@ -107,7 +107,7 @@ def test_stage_service_is_measurement_only_and_cannot_be_selected_as_bms():
         def __init__(self):
             self.paths = {}
 
-        def add_path(self, path, value):
+        def add_path(self, path, value, **_):
             self.paths[path] = value
 
     core = VenusPublisherCore()
@@ -131,7 +131,7 @@ def test_commissioning_service_is_neutral_selectable_and_keeps_deye_limits():
         def __init__(self):
             self.paths = {}
 
-        def add_path(self, path, value):
+        def add_path(self, path, value, **_):
             self.paths[path] = value
 
     core = VenusPublisherCore()
@@ -174,7 +174,7 @@ class RecordingService:
     def __init__(self):
         self.paths = {}
 
-    def add_path(self, path, value):
+    def add_path(self, path, value, **_):
         self.paths[path] = value
 
 

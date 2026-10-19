@@ -100,6 +100,16 @@ REDACTED = "<redacted>"
 VALUE_KEYS = ("value", "cached_value", "effective_value", "last_rejected_value")
 
 
+def _is_pack_serial_path(path: str) -> bool:
+    return path.startswith("/Battery/") and path.endswith("/Serial")
+
+
+def _is_serial_field(name: str) -> bool:
+    return name in SERIAL_FIELDS or (
+        name.startswith("packs.") and name.endswith(SERIAL_FIELDS)
+    )
+
+
 def redact_serial(payload: Any, *, show: bool = False) -> Any:
     """Blank the pack serial before a snapshot or model is printed.
 
@@ -122,9 +132,16 @@ def redact_serial(payload: Any, *, show: bool = False) -> Any:
     if not isinstance(payload, dict):
         return payload
 
-    if payload.get("/Serial") is not None:
-        payload["/Serial"] = REDACTED
-    for name in SERIAL_FIELDS:
+    # Each pack of a parallel bank has its own serial, published at
+    # /Battery/<n>/Serial and cached as packs.<n>.identity.serial_*.
+    for key in list(payload):
+        if not isinstance(key, str):
+            continue
+        if (key == "/Serial" or _is_pack_serial_path(key)) and payload[key] is not None:
+            payload[key] = REDACTED
+    for name in list(payload):
+        if not isinstance(name, str) or not _is_serial_field(name):
+            continue
         state = payload.get(name)
         if isinstance(state, dict):
             # A cached field carries its value under several keys; missing one
