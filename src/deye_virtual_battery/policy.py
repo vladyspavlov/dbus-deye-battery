@@ -370,14 +370,22 @@ def evaluate_policy(
     raw_dcl = _number(fields, "limits.max_discharge_current")
     array_ccl = _number(fields, "limits.array_max_charge_current")
     array_dcl = _number(fields, "limits.array_max_discharge_current")
-    charge_mos = _effective(fields, "mos.charge_closed")
-    discharge_mos = _effective(fields, "mos.discharge_closed")
+    # In a parallel bank the charge path is open while any pack's charge MOS
+    # is closed: the master already builds 0x351 from the packs that accept
+    # charge.  Pack 1's own MOS is the answer only when it is the only pack.
+    charge_mos = _bank_or_pack(fields, "bank.charge_mos_closed", "mos.charge_closed")
+    discharge_mos = _bank_or_pack(
+        fields, "bank.discharge_mos_closed", "mos.discharge_closed"
+    )
 
+    # Every pack's condition tables, not only pack 1's: a fault on another
+    # pack must raise the same alarm.
     conditions = set(
         set(_string_list(fields, "pack.active_v33_conditions"))
+        | set(_string_list(fields, "bank.active_pack_conditions"))
         | set(_string_list(fields, "alarms.active_v33_conditions"))
     )
-    fault_level = _effective(fields, "system.fault_level")
+    fault_level = _bank_or_pack(fields, "bank.fault_level", "system.fault_level")
     if fault_level == "minor":
         conditions.add("system_minor_fault")
     elif fault_level == "major":
@@ -479,14 +487,23 @@ def evaluate_policy(
     # victronCAN profile stops sending the 0x371 array limits, so it is applied
     # restrictively to charge only.  It must never reduce the discharge limit:
     # a stale low value there could stop an islanded Multi.
-    pack_allowable_ccl = _number(fields, "pack.maximum_allowable_charge_current")
-    # 0x250 is quantized to whole amps while 0x351 and 0x371 carry 0.1 A, so a
-    # reported 55 A can mean anything up to 56 A.  Applying its ceiling keeps
-    # the cross-check protective against a genuinely lower pack limit without
-    # shaving a normal limit down by the quantization step.
-    pack_allowable_ccl_ceiling = (
-        pack_allowable_ccl + 1.0 if pack_allowable_ccl is not None else None
-    )
+    #
+    # 0x250 describes one pack.  In a parallel bank the cross-check uses the
+    # sum over the packs that accept charge (see packs.BankView); applying
+    # pack 1's own figure capped a two-pack bank near one pack's share.
+    if "bank.pack_allowable_ccl" in fields:
+        pack_allowable_ccl = _number(fields, "bank.pack_allowable_ccl")
+        pack_allowable_ccl_ceiling = _number(fields, "bank.pack_allowable_ccl_ceiling")
+    else:
+        pack_allowable_ccl = _number(fields, "pack.maximum_allowable_charge_current")
+        # 0x250 is quantized to whole amps while 0x351 and 0x371 carry 0.1 A,
+        # so a reported 55 A can mean anything up to 56 A.  Applying its
+        # ceiling keeps the cross-check protective against a genuinely lower
+        # pack limit without shaving a normal limit down by the quantization
+        # step.
+        pack_allowable_ccl_ceiling = (
+            pack_allowable_ccl + 1.0 if pack_allowable_ccl is not None else None
+        )
     if critical_ready:
         assert raw_ccl is not None and raw_dcl is not None
         assert raw_cvl is not None and pack_voltage is not None
@@ -653,6 +670,9 @@ def evaluate_policy(
             "current_sign_convention_conflict": sign_conflict,
             "array_limits_available": array_ccl is not None and array_dcl is not None,
             "pack_allowable_ccl_applied": pack_allowable_ccl is not None,
+            "pack_count": _effective(fields, "bank.pack_count"),
+            "packs_online": _effective(fields, "bank.packs_online"),
+            "bank_complete": _effective(fields, "bank.complete"),
             "provisional_charge_ceiling_v": config.provisional_charge_ceiling_v,
             "blocked_charge_cvl_v": config.blocked_charge_cvl_v,
             "alarm_flags_affect_directional_limits": False,
@@ -670,6 +690,14 @@ def _effective(fields: dict[str, Any], name: str) -> Any:
 def _number(fields: dict[str, Any], name: str) -> float | None:
     value = _effective(fields, name)
     return float(value) if isinstance(value, (int, float)) else None
+
+
+def _bank_or_pack(fields: dict[str, Any], bank: str, pack: str) -> Any:
+    """Prefer the bank aggregate; fall back to pack 1 when none is derived."""
+
+    if bank in fields:
+        return _effective(fields, bank)
+    return _effective(fields, pack)
 
 
 def _string_list(fields: dict[str, Any], name: str) -> list[str]:
