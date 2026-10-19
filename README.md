@@ -163,6 +163,10 @@ meter before it goes anywhere near the battery.**
   The serial arrives split across `0x600` and `0x650`; the driver joins the two
   halves and publishes nothing at all until both have decoded, because half a
   serial looks like a whole one.
+- **Handles a parallel bank as one battery made of several packs.** Packs
+  linked by their parallel cable share one PCS port; the driver reads every
+  pack's own frames, follows the bank's limits, and shows Venus how many packs
+  there are and what each one is doing.
 - Maps Deye fault tables to real Venus alarms instead of suppressing them.
 - Optionally owns the `0x305`/`0x307` inverter keepalive, but only after an
   explicit, verified handover.
@@ -233,13 +237,48 @@ What the driver measures for itself:
 | Pack voltage thresholds | series count × per-cell limits |
 | Protocol profile | frames present on the wire |
 | Current sign | follows the detected profile |
-| Serial | `0x600` + `0x650` |
+| Serial | `0x600` + `0x650` (each pack: `0x600`/`0x650` + pack − 1) |
 | Firmware marker | `0x500` / `0x363` / `0x35F` |
+| Packs in a parallel bank | `0x364` and the per-pack frames present on the wire |
 
 If the series count cannot be measured — cell voltages missing, or the numbers
 disagree — the driver falls back to 16 and publishes `/HardwareVersion` as
 `… (assumed)` rather than pretending it measured something. Override with
 `CELL_COUNT=` if your pack is different and its cell data is unavailable.
+
+### Parallel banks (several packs on one PCS port)
+
+Deye packs linked pack-to-pack with their parallel cable present **one bank**
+on the master's PCS port, and one driver handles all of them. The bank's
+summary frames (`0x351`, `0x355`, `0x356`, `0x35E`, `0x361`, `0x364`, `0x371`)
+already cover every pack: two 100 Ah packs report 200 Ah, and the bank's
+charge limit counts only the packs that can take charge. Everything else
+arrives once per pack, at `base + (pack address − 1)` — `0x110`/`0x111`,
+`0x150`/`0x151` and so on.
+
+- **Charge is allowed while any pack accepts it.** A full pack opens its own
+  charge MOS; the others keep charging under the bank's limit. Charge stops only
+  when every pack blocks it.
+- **The per-pack charge ceiling is summed** over the packs that accept charge,
+  and the result is still never allowed above the bank's own `0x351` request.
+- **Every pack's faults raise alarms**, and the worst pack's fault level is the
+  bank's.
+- **History is the bank's**: charged and discharged energy are summed, the cycle
+  count is the most-cycled pack's.
+- If a pack's frames go missing, the driver does not guess from the packs it can
+  see: it skips the per-pack ceiling and falls back on the master's count of
+  packs blocking charge (`0x364`).
+
+On the GX, the battery's **System** page shows the number of batteries
+(parallel/series) and cells per battery, and **Individual battery info** shows
+each pack's voltage, current, temperature and serial. The per-pack MOS state,
+allowable currents and cell extremes are under `/Diagnostics/Pack/<n>/`.
+Capacity is the bank's, straight from `0x35E` — it is not added up again.
+
+Verified against a two-pack SE-F5 Pro-C bank's capture
+([#6](https://github.com/vladyspavlov/dbus-deye-battery/issues/6)); the
+behaviour of a pack that drops off the parallel link has only been tested
+synthetically.
 
 ---
 
@@ -595,7 +634,9 @@ Then restart: `svc -t /service/deye-virtual-battery`
 
 ### Device instance, and running more than one pack
 
-Skip this unless you have two packs or a second CAN BMS. The default works.
+Skip this unless you run a second driver or a second CAN BMS. The default
+works — including for a parallel bank, which is one driver however many packs it
+has.
 
 Every `com.victronenergy.battery` on a GX needs its own **VRM device
 instance**. It is what **Settings → System setup → Battery monitor** points
@@ -788,10 +829,16 @@ The source lives in `/data` and is restored by a `/data/rc.local` hook, which
 is Victron's own documented pattern for this.
 
 **Can I run two Deye packs on one GX?**
-Yes. Give each its own `SERVICE_NAME`, and leave `AUTO_DEVICE_INSTANCE=1` so
-Venus hands out the device instances — they come up as 513 and 514 without you
-choosing anything. See
-[Device instance](#device-instance-and-running-more-than-one-pack).
+Yes, in either arrangement:
+
+- **Packs linked by the Deye parallel cable, one of them on the PCS port** —
+  the usual setup. That is one bank and one driver; nothing to configure. See
+  [Parallel banks](#parallel-banks-several-packs-on-one-pcs-port).
+- **Separate packs on separate CAN ports** — run one driver per port, give each
+  its own `SERVICE_NAME`, and leave `AUTO_DEVICE_INSTANCE=1` so Venus hands out
+  the device instances: they come up as 513 and 514 without you choosing
+  anything. See
+  [Device instance](#device-instance-and-running-more-than-one-pack).
 
 **Does it write anything to my system?**
 No VE.Bus mode, no DVCC parameter, no charge or discharge setting — ever. One

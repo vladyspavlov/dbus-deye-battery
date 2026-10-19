@@ -107,6 +107,32 @@ identity data rearranged:
 0x35F   00 1C | F0 05    | FC 08 | 44 59     cell 0x1C  F005  2300  "DY"
 ```
 
+## Per-pack frames in a parallel bank
+
+**Confirmed** on a two-pack SE-F5 Pro-C bank
+([#6](https://github.com/vladyspavlov/dbus-deye-battery/issues/6)). The V3.3
+document numbers `0x110`, `0x150`, `0x200`, `0x250`, `0x400`, `0x500`, `0x550`,
+`0x600`, `0x650`, `0x700` and `0x750` as `base + (BmsAddr − 1)`; the second
+pack appears at `0x111`, `0x151`, … at the same rate as the first. The
+`0x35x`/`0x36x`/`0x371` frames are the master's summary of the whole bank:
+
+| | Pack 1 | Pack 2 | Bank |
+|---|---|---|---|
+| Charge MOS (`0x11n` byte 7) | open (`0x21`) | closed (`0x31`) | `0x364`: 2 connected, 1 blocking charge |
+| Allowable charge (`0x25n`) | 18 A | 45 A | `0x351`/`0x371`: 45 A |
+| Allowable discharge (`0x25n`) | 100 A | 100 A | `0x351`: 200 A |
+| SOC (`0x15n`) | 97.6 % | 90.5 % | `0x355`: 94 % |
+| Nominal capacity | — | — | `0x35E`: 200 Ah (2 × 100 Ah) |
+
+The bank discharge limit is the sum of the packs', and the bank charge limit
+is the sum over the packs whose charge MOS is closed — pack 1's 18 A is left
+out while its MOS is open. `0x361` carries the bank-wide cell extremes, which
+matched pack 2's `0x201` in that capture.
+
+**Not yet seen:** a bank with both charge MOS closed (to confirm `0x351` is
+then the full sum), a fault on a non-master pack (to confirm `0x359`
+summarises it), and a pack dropping off the parallel link.
+
 ## Open: cell manufacturer code `0x1C`
 
 **Unknown.** `0x35E` byte 5 reads `0x1C` (28) on every frame captured — 337
