@@ -384,10 +384,17 @@ class DeyeDecoder:
         ccl = _scaled(current_limit_word(frame.payload, 2), 10, 1)
         dcl = _scaled(current_limit_word(frame.payload, 4), 10, 1)
         low = _scaled(_u16(frame.payload, 6), 10, 1)
+        # A frame whose own voltage limits are impossible is not a limit
+        # request.  Parallel banks have been seen to send an all-zero 0x351
+        # between the real ones (issue #7); taking its 0 A at face value
+        # blocked discharge for a second at a time and held CVL at the
+        # blocked-charge value.  Every field of such a frame is rejected, so
+        # the cache keeps the previous limits and their age keeps running.
+        frame_ok = _in_range(cvl, 40, 65) and _in_range(low, 35, 60)
         return [
             _field(frame, "limits.max_charge_voltage", cvl, "V", CRITICAL, valid=_in_range(cvl, 40, 65)),
-            _field(frame, "limits.max_charge_current", ccl, "A", CRITICAL, valid=_in_range(ccl, 0, 1000)),
-            _field(frame, "limits.max_discharge_current", dcl, "A", CRITICAL, valid=_in_range(dcl, 0, 1000)),
+            _field(frame, "limits.max_charge_current", ccl, "A", CRITICAL, valid=frame_ok and _in_range(ccl, 0, 1000)),
+            _field(frame, "limits.max_discharge_current", dcl, "A", CRITICAL, valid=frame_ok and _in_range(dcl, 0, 1000)),
             _field(
                 frame,
                 "limits.battery_low_voltage",
@@ -407,6 +414,7 @@ class DeyeDecoder:
                 ccl <= 0.0 and cvl > 57.6,
                 None,
                 CRITICAL,
+                valid=frame_ok,
                 note="Flags the observed combination; it does not alter limits",
             ),
         ]
