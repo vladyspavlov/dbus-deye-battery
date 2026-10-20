@@ -268,6 +268,13 @@ arrives once per pack, at `base + (pack address − 1)` — `0x110`/`0x111`,
 - If a pack's frames go missing, the driver does not guess from the packs it can
   see: it skips the per-pack ceiling and falls back on the master's count of
   packs blocking charge (`0x364`).
+- **An all-zero `0x351` is ignored.** Some parallel banks send one between the
+  real ones, every few seconds
+  ([#7](https://github.com/vladyspavlov/dbus-deye-battery/issues/7)). A charge
+  voltage limit of 0 V is not a request, so the whole frame is refused and the
+  previous limits stay in place. A real stop, with valid voltage limits and
+  0 A, is followed as before. `/Diagnostics/Deye/RejectedLimitFrames` counts
+  the refused frames.
 
 On the GX, the battery's **System** page shows the number of batteries
 (parallel/series) and cells per battery, and **Individual battery info** shows

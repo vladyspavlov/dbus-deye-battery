@@ -133,6 +133,31 @@ matched pack 2's `0x201` in that capture.
 then the full sum), a fault on a non-master pack (to confirm `0x359`
 summarises it), and a pack dropping off the parallel link.
 
+## All-zero `0x351` in a parallel bank
+
+**Probable**, from one capture and one screen recording
+([#7](https://github.com/vladyspavlov/dbus-deye-battery/issues/7)). A two-pack
+SE-F5 Pro-C bank sent two kinds of `0x351` on the PCS port:
+
+| `0x351` payload | Meaning | Interval |
+|---|---|---|
+| `48 02 00 00 D0 07 E0 01` | 58.4 V / 0 A / 200 A / 48 V | about 1.06 s |
+| `00 00 00 00 00 00 00 00` | all zero | 5.35 s |
+
+The all-zero frame keeps its own clock, unrelated to the real one, and arrives
+together with `0x300` (`15 00 00 00 05 00 00 00`), an all-zero `0x301` and an
+all-zero `0x350`, none of which the V3.3 document defines. Both packs' own
+frames stay healthy meanwhile. The reporter sees it only while the packs' link
+cable is connected, whichever pack is master, and the stock Venus driver shows
+every limit dropping to 0 for about a second. The same behaviour has been
+reported on other Deye parallel banks under other protocols. The
+[#6](https://github.com/vladyspavlov/dbus-deye-battery/issues/6) bank, the same
+model, sent no such frame in 53 s, so it depends on firmware or bank state.
+
+Since 0.8.1 the driver refuses any `0x351` whose own charge voltage or low
+voltage limit is out of range, keeping the previous limits. A real stop keeps
+valid voltage limits and is unaffected.
+
 ## Open: cell manufacturer code `0x1C`
 
 **Unknown.** `0x35E` byte 5 reads `0x1C` (28) on every frame captured — 337
