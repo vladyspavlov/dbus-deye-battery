@@ -1,6 +1,6 @@
 """Single version marker for the package and the live Venus publisher."""
 
-VERSION = "0.8.0"
+VERSION = "0.8.1"
 
 # Published on D-Bus at /Mgmt/ProcessVersion and /FirmwareVersion.  Venus and
 # VRM display these verbatim, so the value stays strictly numeric.

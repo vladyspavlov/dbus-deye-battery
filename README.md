@@ -268,6 +268,13 @@ arrives once per pack, at `base + (pack address − 1)` — `0x110`/`0x111`,
 - If a pack's frames go missing, the driver does not guess from the packs it can
   see: it skips the per-pack ceiling and falls back on the master's count of
   packs blocking charge (`0x364`).
+- **An all-zero `0x351` is ignored.** Some parallel banks send one between the
+  real ones, every few seconds
+  ([#7](https://github.com/vladyspavlov/dbus-deye-battery/issues/7)). A charge
+  voltage limit of 0 V is not a request, so the whole frame is refused and the
+  previous limits stay in place. A real stop, with valid voltage limits and
+  0 A, is followed as before. `/Diagnostics/Deye/RejectedLimitFrames` counts
+  the refused frames.
 
 On the GX, the battery's **System** page shows the number of batteries
 (parallel/series) and cells per battery, and **Individual battery info** shows
@@ -454,7 +461,7 @@ DRY_RUN=1 sh bootstrap.sh       # says what it would do, writes nothing
 sh bootstrap.sh
 
 # 2. Pin the release archive to a checksum you obtained yourself.
-VERSION=0.8.0 SHA256=<sha256 of the tarball> sh bootstrap.sh
+VERSION=0.8.1 SHA256=<sha256 of the tarball> sh bootstrap.sh
 
 # 3. Skip the bootstrap entirely and do it by hand -- see below.
 ```
@@ -565,7 +572,7 @@ set of files, so the version the driver reports on D-Bus and in VRM always maps
 back to exact code, which is what you need when something misbehaves at 2am.
 
 ```sh
-VERSION=0.8.0          # see the Releases page for the current one
+VERSION=0.8.1          # see the Releases page for the current one
 
 cd /data
 wget -O deye.tar.gz https://github.com/vladyspavlov/dbus-deye-battery/archive/refs/tags/v$VERSION.tar.gz

@@ -3,6 +3,27 @@
 Versions are strictly numeric: Venus OS and VRM display `/Mgmt/ProcessVersion`
 verbatim, so no suffixes or build tags appear here.
 
+## 0.8.1
+
+### Fixed
+- **An all-zero `0x351` from a parallel bank blocked discharge and held CVL
+  down** ([#7](https://github.com/vladyspavlov/dbus-deye-battery/issues/7)).
+  A two-pack SE-F5 Pro-C bank sends an all-zero `0x351` between its real ones,
+  every 5.35 s. Its 0 V voltage limits were already refused, but its 0 A
+  currents were taken as a request: the driver published DCL 0 A for about a
+  second at a time, which can stop an inverter running off-grid, and while
+  charging it held CVL at the blocked-charge 55.2 V, because the 20 s
+  qualification for raising it never completed between two such frames. A
+  `0x351` whose own charge voltage or low voltage limit is out of range is
+  now refused as a whole, and the previous limits stay in place. If such
+  frames are all that arrives, the limits age out after 3 s exactly as when
+  `0x351` stops. A real stop, with valid voltage limits and 0 A, is followed
+  as before.
+
+### Added
+- `/Diagnostics/Deye/RejectedLimitFrames`: the number of `0x351` frames whose
+  limits were refused.
+
 ## 0.8.0
 
 Multi-pack support. Deye packs linked by their parallel cable present one bank

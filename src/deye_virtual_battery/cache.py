@@ -207,6 +207,8 @@ class VirtualBatteryCache:
     decoded_frames: int = 0
     unknown_frames: int = 0
     decode_errors: int = 0
+    # 0x351 frames carrying at least one limit the decoder refused.
+    rejected_limit_frames: int = 0
     ids: dict[int, int] = field(default_factory=dict)
     stream_last_timestamp: dict[str, float] = field(default_factory=dict)
     stream_max_gap: dict[str, float] = field(default_factory=dict)
@@ -274,6 +276,8 @@ class VirtualBatteryCache:
             self.unknown_frames += 1
             return []
         self.decoded_frames += 1
+        if frame.can_id == 0x351 and not all(item.valid for item in updates):
+            self.rejected_limit_frames += 1
         for decoded in updates:
             existing = self.fields.get(decoded.name)
             if decoded.name == "battery.soc" and decoded.valid:
@@ -595,6 +599,7 @@ class VirtualBatteryCache:
                 "decoded_frames": self.decoded_frames,
                 "unknown_or_wrong_direction_frames": self.unknown_frames,
                 "decode_errors": self.decode_errors,
+                "rejected_limit_frames": self.rejected_limit_frames,
                 "can_id_counts": {
                     f"0x{can_id:03X}": count for can_id, count in sorted(self.ids.items())
                 },

@@ -142,6 +142,12 @@ def build_mock_dbus_model(
         "/Diagnostics/Deye/RawCvl": policy["raw_limits"]["cvl_v"],
         "/Diagnostics/Deye/RawCcl": policy["raw_limits"]["ccl_a"],
         "/Diagnostics/Deye/RawDcl": policy["raw_limits"]["dcl_a"],
+        # 0x351 frames whose limits were refused, such as the all-zero frame
+        # some parallel banks interleave with the real one.  The published
+        # limits keep the last accepted frame's values meanwhile.
+        "/Diagnostics/Deye/RejectedLimitFrames": (
+            snapshot.get("statistics", {}).get("rejected_limit_frames", 0)
+        ),
         "/Diagnostics/VebusDcVoltage": vebus_voltage_v,
         "/Diagnostics/VoltageDelta": policy["voltage_observations"]["vebus_minus_deye_v"],
         "/Diagnostics/VoltageMismatch": int(policy["voltage_observations"]["mismatch"]),
