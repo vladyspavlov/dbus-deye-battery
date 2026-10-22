@@ -15,6 +15,7 @@ from .profile import (
     VICTRON_CAN,
     ProtocolProfileDetector,
 )
+from .id_layout import ShiftedIdLayout
 from .packs import PACK_FIELD, BankView, bank_snapshot_fields
 
 
@@ -220,6 +221,8 @@ class VirtualBatteryCache:
     decode_errors: int = 0
     # 0x351 frames carrying at least one limit the decoder refused.
     rejected_limit_frames: int = 0
+    # Undoes the id shift of firmware that clears bit 10; idle until proven.
+    id_layout: ShiftedIdLayout = field(default_factory=ShiftedIdLayout)
     ids: dict[int, int] = field(default_factory=dict)
     stream_last_timestamp: dict[str, float] = field(default_factory=dict)
     stream_max_gap: dict[str, float] = field(default_factory=dict)
@@ -269,6 +272,9 @@ class VirtualBatteryCache:
                 frame.can_id, frame.payload, frame.timestamp
             )
             self._sync_profile_events()
+            # After the profile detector, which classifies by the ids
+            # actually on the wire.
+            frame = self.id_layout.normalise(frame)
         assert self.decoder is not None
         try:
             updates = self.decoder.decode(frame)
@@ -611,6 +617,8 @@ class VirtualBatteryCache:
                 "unknown_or_wrong_direction_frames": self.unknown_frames,
                 "decode_errors": self.decode_errors,
                 "rejected_limit_frames": self.rejected_limit_frames,
+                "shifted_id_layout": self.id_layout.active,
+                "shifted_id_frames": self.id_layout.remapped_frames,
                 "can_id_counts": {
                     f"0x{can_id:03X}": count for can_id, count in sorted(self.ids.items())
                 },
