@@ -3,6 +3,22 @@
 Versions are strictly numeric: Venus OS and VRM display `/Mgmt/ProcessVersion`
 verbatim, so no suffixes or build tags appear here.
 
+## 0.8.2
+
+### Fixed
+- **The driver used far more CPU than it needed.** On a GX it kept about a
+  third of one core busy, and since 0.8.0 noticeably more with a parallel
+  bank ([#10](https://github.com/vladyspavlov/dbus-deye-battery/issues/10)).
+  Most of it was the CAN keepalive thread: every 50 ms it walked all of
+  `/proc` to see whether the stock `can-bus-bms` driver was running, about
+  13 ms of work each time on a GX with 300 processes, even on installations
+  where it never transmits. It now follows the stock driver by its pid while
+  it runs and looks for it at most once a second while it is absent, and
+  still looks again right before every keepalive it sends. Each 250 ms update
+  also does about a third less work: timestamps are no longer formatted as
+  text for every field four times a second, and the 30 or so pack slots no
+  pack uses are no longer rebuilt. Nothing that is published changes.
+
 ## 0.8.1
 
 ### Fixed
