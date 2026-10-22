@@ -150,6 +150,13 @@ def build_mock_dbus_model(
         "/Diagnostics/Deye/RejectedLimitFrames": (
             snapshot.get("statistics", {}).get("rejected_limit_frames", 0)
         ),
+        # 1 once the bank has proven its firmware clears bit 10 of the ids.
+        "/Diagnostics/Deye/ShiftedIdLayout": int(
+            bool(snapshot.get("statistics", {}).get("shifted_id_layout", False))
+        ),
+        "/Diagnostics/Deye/ShiftedIdFrames": (
+            snapshot.get("statistics", {}).get("shifted_id_frames", 0)
+        ),
         "/Diagnostics/VebusDcVoltage": vebus_voltage_v,
         "/Diagnostics/VoltageDelta": policy["voltage_observations"]["vebus_minus_deye_v"],
         "/Diagnostics/VoltageMismatch": int(policy["voltage_observations"]["mismatch"]),
