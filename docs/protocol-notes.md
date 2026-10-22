@@ -133,30 +133,53 @@ matched pack 2's `0x201` in that capture.
 then the full sum), a fault on a non-master pack (to confirm `0x359`
 summarises it), and a pack dropping off the parallel link.
 
-## All-zero `0x351` in a parallel bank
+## Firmware that clears bit 10 of the CAN id
 
-**Probable**, from one capture and one screen recording
+**High confidence**, from two captures of one bank, read against the same model
+with other firmware ([#6](https://github.com/vladyspavlov/dbus-deye-battery/issues/6))
+and the V3.3 document
 ([#7](https://github.com/vladyspavlov/dbus-deye-battery/issues/7)). A two-pack
-SE-F5 Pro-C bank sent two kinds of `0x351` on the PCS port:
+SE-F5 Pro-C bank whose master reports software word `0x02E0` in `0x363` sends
+every per-pack frame of `0x400` and above with bit 10 of the id cleared. Each
+frame is otherwise exactly the V3.3 one, at the V3.3 rate:
 
-| `0x351` payload | Meaning | Interval |
-|---|---|---|
-| `48 02 00 00 D0 07 E0 01` | 58.4 V / 0 A / 200 A / 48 V | about 1.06 s |
-| `00 00 00 00 00 00 00 00` | all zero | 5.35 s |
+| Documented | Arrives as | Lands on | Interval per pack |
+|---|---|---|---|
+| `0x400` system state | `0x000` | nothing | about 1 s |
+| `0x500` software version | `0x100` | nothing | about 2 s |
+| `0x550` energy counters | `0x150` | the pack's own `0x150` summary | 5.35 s |
+| `0x600` serial, first half | `0x200` | the pack's own `0x200` cell extremes | about 2 s |
+| `0x650` serial, second half | `0x250` | the pack's own `0x250` | about 2 s |
+| `0x700` fault counters | `0x300` | `0x305`/`0x307` from pack 6 up | 5.35 s |
+| `0x750` fault counters | `0x350` | the bank's `0x351` and up, from pack 2 | 5.35 s |
 
-The all-zero frame keeps its own clock, unrelated to the real one, and arrives
-together with `0x300` (`15 00 00 00 05 00 00 00`), an all-zero `0x301` and an
-all-zero `0x350`, none of which the V3.3 document defines. Both packs' own
-frames stay healthy meanwhile. The reporter sees it only while the packs' link
-cable is connected, whichever pack is master, and the stock Venus driver shows
-every limit dropping to 0 for about a second. The same behaviour has been
-reported on other Deye parallel banks under other protocols. The
-[#6](https://github.com/vladyspavlov/dbus-deye-battery/issues/6) bank, the same
-model, sent no such frame in 53 s, so it depends on firmware or bank state.
+The evidence: the bank sends no id of `0x400` or above at all; its `0x000`,
+`0x100`, `0x300` and `0x350` carry the payload layouts of `0x400`, `0x500`
+(`0xAA` marker and "V1.0E"), `0x700` and `0x750`; `0x200` and `0x250` carry
+eight ASCII characters every two seconds, the serial halves; the surplus
+`0x150` frames read as two growing 32-bit Wh counters; and the cycle count in
+`0x000` agrees with those counters (about 4.2 kWh per cycle on both packs).
+The #6 bank, whose master reports `0x01E0`, sends the documented ids, with
+`0x700`, `0x750` and `0x751` on the same 5.35 s clock and an all-zero `0x751`.
 
-Since 0.8.1 the driver refuses any `0x351` whose own charge voltage or low
-voltage limit is out of range, keeping the previous limits. A real stop keeps
-valid voltage limits and is unaffected.
+So the all-zero `0x351` this bank sends every 5.35 s with both packs linked is
+pack 2's `0x751`: its charge and discharge over-current and over-temperature
+counts, all still zero. With one pack it lands on the unused `0x350` and
+nothing shows. Taken as limits, it published DCL 0 A for about a second at a
+time and held CVL at the blocked-charge value while charging. Pack summaries
+were also hit: the energy counters' high words read as a pack current of a few
+tenths of an amp and an SOH of 0.2 %, while the serial text and the other
+counter words are out of every range and were refused.
+
+Since 0.8.1 any `0x351` whose own charge voltage or low voltage limit is out
+of range is refused as a whole, which also covers a `0x751` whose counters are
+no longer zero. Since 0.8.2 the driver recognises the shifted layout and reads
+the frames under their documented ids, see "Shifted ids" in the README. It
+remaps nothing until two frames have proven the shift, and nothing at all on a
+bank that sends any documented id of `0x400` or above. Pack 2's `0x751` cannot
+be recovered, and a bank of six or more packs on this firmware would put
+`0x755` on the bank's `0x355` and `0x705` on the PCS's own `0x305`, which no
+driver can undo.
 
 ## Open: cell manufacturer code `0x1C`
 

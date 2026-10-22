@@ -268,13 +268,23 @@ arrives once per pack, at `base + (pack address − 1)` — `0x110`/`0x111`,
 - If a pack's frames go missing, the driver does not guess from the packs it can
   see: it skips the per-pack ceiling and falls back on the master's count of
   packs blocking charge (`0x364`).
-- **An all-zero `0x351` is ignored.** Some parallel banks send one between the
-  real ones, every few seconds
+- **An all-zero `0x351` is ignored.** Firmware that shifts the ids (below)
+  sends pack 2's fault counters as an all-zero `0x351` every 5.35 s
   ([#7](https://github.com/vladyspavlov/dbus-deye-battery/issues/7)). A charge
   voltage limit of 0 V is not a request, so the whole frame is refused and the
   previous limits stay in place. A real stop, with valid voltage limits and
   0 A, is followed as before. `/Diagnostics/Deye/RejectedLimitFrames` counts
   the refused frames.
+- **Shifted ids.** Some Deye firmware sends every per-pack frame of `0x400`
+  and above with bit 10 of the id cleared, so `0x550` arrives as `0x150`,
+  `0x600` as `0x200` and so on, on top of other frames
+  ([details](docs/protocol-notes.md#firmware-that-clears-bit-10-of-the-can-id)).
+  The driver recognises it from frames only a shifted bank can send and then
+  reads each frame under its documented id: pack currents stay right, and
+  serials, cycles, energy, balancing and fault counters appear. A bank that
+  sends the documented ids is never remapped.
+  `/Diagnostics/Deye/ShiftedIdLayout` is 1 when the shift is recognised and
+  `/Diagnostics/Deye/ShiftedIdFrames` counts the remapped frames.
 
 On the GX, the battery's **System** page shows the number of batteries
 (parallel/series) and cells per battery, and **Individual battery info** shows

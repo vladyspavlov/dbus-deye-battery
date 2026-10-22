@@ -18,6 +18,23 @@ verbatim, so no suffixes or build tags appear here.
   also does about a third less work: timestamps are no longer formatted as
   text for every field four times a second, and the 30 or so pack slots no
   pack uses are no longer rebuilt. Nothing that is published changes.
+- **Firmware that clears bit 10 of the CAN id was misread**
+  ([#7](https://github.com/vladyspavlov/dbus-deye-battery/issues/7)). A
+  two-pack SE-F5 Pro-C bank sends every per-pack frame of `0x400` and above
+  with bit 10 cleared, so its energy counters (`0x550`) arrive as `0x150` and
+  its serial (`0x600`/`0x650`) as `0x200`/`0x250`, on top of each pack's own
+  frames, and pack 2's fault counters (`0x751`) arrive as the all-zero `0x351`
+  that 0.8.1 refuses. The energy counters' high words were read as a pack
+  current of a few tenths of an amp for a second every 5.35 s, which would
+  grow with the counters, and the serial, cycles, balancing and counters were
+  missing. The driver now recognises the shift from frames only a shifted
+  bank sends, and then reads each frame under its documented id. A bank that
+  sends the documented ids is never remapped, and nothing it publishes
+  changes.
+
+### Added
+- `/Diagnostics/Deye/ShiftedIdLayout` (1 once the shift is recognised) and
+  `/Diagnostics/Deye/ShiftedIdFrames` (frames read under their documented id).
 
 ## 0.8.1
 
