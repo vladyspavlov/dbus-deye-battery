@@ -34,9 +34,11 @@ def pack_numbers(names: Iterable[str]) -> list[int]:
 
     numbers = set()
     for name in names:
-        match = PACK_FIELD.match(name)
-        if match:
-            numbers.add(int(match.group(1)))
+        # Same test as PACK_FIELD, without a regex call for every field.
+        if name.startswith("packs."):
+            number, dot, _ = name[6:].partition(".")
+            if dot and number.isdigit():
+                numbers.add(int(number))
     return sorted(numbers)
 
 
