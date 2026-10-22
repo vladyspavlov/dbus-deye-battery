@@ -97,6 +97,10 @@ class FieldState:
     rejected_updates: int = 0
     last_rejected_timestamp: float | None = None
     last_rejected_value: Any = None
+    # The text form of last_valid_timestamp, kept because a snapshot is taken
+    # four times a second and most fields change once a second or less.
+    _valid_utc_for: float | None = field(default=None, init=False, repr=False, compare=False)
+    _valid_utc: str | None = field(default=None, init=False, repr=False, compare=False)
 
     def update(self, decoded: DecodedField, timestamp: float) -> None:
         if decoded.valid:
@@ -134,7 +138,7 @@ class FieldState:
             "category": self.category,
             "source_can_id": f"0x{self.source_can_id:03X}" if self.source_can_id is not None else "configuration",
             "last_valid_timestamp": self.last_valid_timestamp,
-            "last_valid_utc": _timestamp_text(self.last_valid_timestamp),
+            "last_valid_utc": self._valid_utc_text(),
             "age_seconds": round(age, 6) if age is not None else None,
             "freshness": freshness,
             "usable": usable,
@@ -145,6 +149,13 @@ class FieldState:
             "last_rejected_timestamp": self.last_rejected_timestamp,
             "last_rejected_value": self.last_rejected_value,
         }
+
+
+    def _valid_utc_text(self) -> str | None:
+        if self._valid_utc_for != self.last_valid_timestamp:
+            self._valid_utc_for = self.last_valid_timestamp
+            self._valid_utc = _timestamp_text(self.last_valid_timestamp)
+        return self._valid_utc
 
 
 def _timestamp_text(timestamp: float | None) -> str | None:

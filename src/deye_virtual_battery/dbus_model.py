@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from .decoder import MAX_PACKS, pack_field_name
+from .packs import pack_numbers
 from .version import VERSION
 from .policy import PolicyConfig, evaluate_policy
 
@@ -235,6 +237,50 @@ PACK_PATH_FIELDS: tuple[tuple[str, str], ...] = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class _PackSlot:
+    """Every path and field name of one pack slot, formatted once."""
+
+    values: tuple[tuple[str, str], ...]
+    serial: str
+    online: str
+    charge_mos: str
+    discharge_mos: str
+    prefix: str
+    raw_flags: str
+    charge_closed: str
+    discharge_closed: str
+    unused: dict[str, None]
+
+
+def _pack_slot(pack: int) -> _PackSlot:
+    values = tuple(
+        (template.format(n=pack), pack_field_name(pack, name))
+        for template, name in PACK_PATH_FIELDS
+    )
+    serial = f"/Battery/{pack}/Serial"
+    online = f"/Diagnostics/Pack/{pack}/Online"
+    charge_mos = f"/Diagnostics/Pack/{pack}/ChargeMosClosed"
+    discharge_mos = f"/Diagnostics/Pack/{pack}/DischargeMosClosed"
+    return _PackSlot(
+        values=values,
+        serial=serial,
+        online=online,
+        charge_mos=charge_mos,
+        discharge_mos=discharge_mos,
+        prefix=pack_field_name(pack, ""),
+        raw_flags=pack_field_name(pack, "mos.raw_flags"),
+        charge_closed=pack_field_name(pack, "mos.charge_closed"),
+        discharge_closed=pack_field_name(pack, "mos.discharge_closed"),
+        unused=dict.fromkeys(
+            [path for path, _ in values] + [serial, online, charge_mos, discharge_mos]
+        ),
+    )
+
+
+_PACK_SLOTS = {pack: _pack_slot(pack) for pack in range(1, MAX_PACKS + 1)}
+
+
 def pack_paths(fields: dict[str, Any], *, ready: bool = True) -> dict[str, Any]:
     """Publish each pack of a parallel bank on its own.
 
@@ -247,28 +293,31 @@ def pack_paths(fields: dict[str, Any], *, ready: bool = True) -> dict[str, Any]:
 
     paths: dict[str, Any] = {}
     seen = set(_effective(fields, "bank.packs_seen") or ())
-    for pack in range(1, MAX_PACKS + 1):
+    # bank.packs_seen is this same scan of the snapshot's field names; only a
+    # snapshot without the bank aggregates needs it done again.
+    present = seen if "bank.packs_seen" in fields else set(pack_numbers(fields))
+    for pack, slot in _PACK_SLOTS.items():
+        if pack not in seen and pack not in present:
+            # Nothing was ever decoded for this slot, so every path is
+            # invalid.  Most slots are like this, and this runs four times a
+            # second.
+            paths.update(slot.unused)
+            continue
         # A pack is online while its 0x110-family frame is fresh.  Its other
         # frames stay cached for minutes, so an offline pack publishes
         # nothing rather than its last readings.
-        online = ready and _effective(fields, pack_field_name(pack, "mos.raw_flags")) is not None
+        online = ready and _effective(fields, slot.raw_flags) is not None
 
         def value(name: str) -> Any:
-            return _effective(fields, pack_field_name(pack, name)) if online else None
+            return _effective(fields, name) if online else None
 
-        for template, name in PACK_PATH_FIELDS:
-            paths[template.format(n=pack)] = value(name)
-        paths[f"/Battery/{pack}/Serial"] = (
-            serial_number(fields, prefix=pack_field_name(pack, "")) if online else None
-        )
+        for path, name in slot.values:
+            paths[path] = value(name)
+        paths[slot.serial] = serial_number(fields, prefix=slot.prefix) if online else None
         # Invalid for a slot no pack has used; 0 for a pack that went silent.
-        paths[f"/Diagnostics/Pack/{pack}/Online"] = (
-            int(online) if ready and pack in seen else None
-        )
-        paths[f"/Diagnostics/Pack/{pack}/ChargeMosClosed"] = _flag(value("mos.charge_closed"))
-        paths[f"/Diagnostics/Pack/{pack}/DischargeMosClosed"] = _flag(
-            value("mos.discharge_closed")
-        )
+        paths[slot.online] = int(online) if ready and pack in seen else None
+        paths[slot.charge_mos] = _flag(value(slot.charge_closed))
+        paths[slot.discharge_mos] = _flag(value(slot.discharge_closed))
     return paths
 
 
