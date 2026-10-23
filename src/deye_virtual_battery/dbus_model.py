@@ -241,6 +241,8 @@ PACK_PATH_FIELDS: tuple[tuple[str, str], ...] = (
     ("/Diagnostics/Pack/{n}/AllowableDischargeCurrent", "pack.maximum_allowable_discharge_current"),
     ("/Diagnostics/Pack/{n}/MaxCellVoltage", "cells.max_voltage_200"),
     ("/Diagnostics/Pack/{n}/MinCellVoltage", "cells.min_voltage_200"),
+    # Deye's own 0x400 byte 0: 0 standstill, 1 charge, 2 discharge.
+    ("/Diagnostics/Pack/{n}/OperationMode", "system.operation_mode_code"),
 )
 
 

@@ -57,6 +57,8 @@ class Pack:
     cell_max: float = 3.343
     cell_min: float = 3.331
     temperature_max: float = 23.0
+    # 0x400 byte 0: 0 standstill, 1 charge, 2 discharge.
+    operation_mode: int = 0
     fault_level: int = 0
     cycles: int = 11
     balance_mask: int = 0
@@ -134,7 +136,7 @@ class Bank:
                 ),
                 (
                     0x400 + offset,
-                    bytes([0, pack.fault_level]) + _u16(pack.cycles)
+                    bytes([pack.operation_mode, pack.fault_level]) + _u16(pack.cycles)
                     + _u16(pack.balance_mask) + _u16(3),
                 ),
                 (0x550 + offset, _u32(pack.charged_wh) + _u32(pack.discharged_wh)),
@@ -420,6 +422,42 @@ def test_each_pack_is_published_on_its_own():
     assert paths["/Battery/3/Voltage"] is None
     assert paths[f"/Battery/{MAX_PACKS}/Voltage"] is None
     assert f"/Battery/{MAX_PACKS + 1}/Voltage" not in paths
+
+
+def test_each_pack_publishes_its_own_operation_mode():
+    # #6: a full pack with its charge MOS open stands at 0 A while the other
+    # carries the whole discharge, and the vendor app shows them that way.
+    bank = Bank(
+        packs=[
+            Pack(charge_closed=False, soc=99.7, voltage=53.3, operation_mode=0),
+            Pack(soc=90.0, voltage=53.0, deye_current=3.4, operation_mode=2),
+        ],
+        deye_current=3.4,
+    )
+    paths = bank.model()["paths"]
+    assert paths["/Diagnostics/Pack/1/OperationMode"] == 0
+    assert paths["/Diagnostics/Pack/2/OperationMode"] == 2
+    assert paths["/Diagnostics/Pack/3/OperationMode"] is None
+
+
+def test_an_undocumented_operation_mode_is_published_as_invalid():
+    bank = Bank(packs=[Pack(operation_mode=1), Pack(operation_mode=7)])
+    paths = bank.model()["paths"]
+    assert paths["/Diagnostics/Pack/1/OperationMode"] == 1
+    assert paths["/Diagnostics/Pack/2/OperationMode"] is None
+
+
+def test_a_silent_pack_publishes_no_operation_mode():
+    bank = Bank(packs=[Pack(operation_mode=2), Pack(operation_mode=2)])
+    cache, at = bank.cache(seconds=3)
+    bank.silent = (2,)
+    for second in range(3, 30):
+        for line in bank.frames(1000.0 + second):
+            cache.apply(parse_candump_line(line))
+    paths = build_mock_dbus_model(cache.snapshot(at=1029.2))["paths"]
+    assert paths["/Diagnostics/Pack/1/OperationMode"] == 2
+    assert paths["/Diagnostics/Pack/2/Online"] == 0
+    assert paths["/Diagnostics/Pack/2/OperationMode"] is None
 
 
 def test_history_covers_every_pack():
