@@ -289,7 +289,9 @@ arrives once per pack, at `base + (pack address − 1)` — `0x110`/`0x111`,
 On the GX, the battery's **System** page shows the number of batteries
 (parallel/series) and cells per battery, and **Individual battery info** shows
 each pack's voltage, current, temperature and serial. The per-pack MOS state,
-allowable currents and cell extremes are under `/Diagnostics/Pack/<n>/`.
+allowable currents, cell extremes and operation mode (`OperationMode`: 0
+standstill, 1 charge, 2 discharge, as the Deye app shows it) are under
+`/Diagnostics/Pack/<n>/`.
 Capacity is the bank's, straight from `0x35E` — it is not added up again.
 
 Verified against a two-pack SE-F5 Pro-C bank's capture

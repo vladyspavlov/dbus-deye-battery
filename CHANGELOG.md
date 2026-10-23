@@ -3,6 +3,11 @@
 Versions are strictly numeric: Venus OS and VRM display `/Mgmt/ProcessVersion`
 verbatim, so no suffixes or build tags appear here.
 
+## Unreleased
+
+### Added
+- **Each pack's operation mode is published** on `/Diagnostics/Pack/<n>/OperationMode`: Deye's own `0x400` byte 0, 0 standstill, 1 charge, 2 discharge, the same status the Deye app shows per pack ([#6](https://github.com/vladyspavlov/dbus-deye-battery/issues/6)). In a parallel bank it shows at a glance which pack is idle while the other carries the load. A value Deye does not document, or a pack that has gone silent, publishes as invalid. Nothing else changes.
+
 ## 0.8.2
 
 ### Fixed
