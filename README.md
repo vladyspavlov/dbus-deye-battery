@@ -200,7 +200,7 @@ pack transmits — set it with `MODEL=` if you want your exact variant displayed
 | **Deye SE-F12-C** | Verified — developed and running against one installation |
 | **Deye SE-G5.1 Pro B** | Verified on hardware — 100 Ah, 16-series, running live as the controlling BMS |
 | **Deye SE-F5 Pro-C** | Verified on hardware by a user — 100 Ah, 16-series, decoded with zero errors ([#1](https://github.com/vladyspavlov/dbus-deye-battery/issues/1)) |
-| **Deye SE-F16-C** | Expected to work, unconfirmed on hardware |
+| **Deye SE-F16-C** | Verified on hardware by a user: 314 Ah, 16-series, decoded with zero errors |
 | Other Deye LV packs on the PCS CAN protocol | Plausible, unconfirmed |
 
 A second model is now confirmed on hardware: the **SE-G5.1 Pro B** — a different
@@ -211,7 +211,10 @@ different packs need no model-specific code is the strongest evidence yet that
 nothing here is tied to one battery. A third, the **SE-F5 Pro-C**, has since
 been confirmed by a user ([#1](https://github.com/vladyspavlov/dbus-deye-battery/issues/1)): its capture decodes with zero errors on
 the same `deye_native` frame set, again with 100 Ah and 16 cells read from the
-wire.
+wire. A fourth, the **SE-F16-C**, has been confirmed from a user's capture: over
+8 minutes of `deye_native` traffic, including a charge at about 55 A, decode
+with zero errors and no unknown frame, with 314 Ah and 16 cells read from the
+wire and the current sign following the pack voltage.
 
 If you run it on a model not listed as verified, please
 [open an issue](https://github.com/vladyspavlov/dbus-deye-battery/issues)
@@ -836,10 +839,11 @@ hand over CAN ownership if the stock driver keeps publishing a misidentified
 service, because Venus's vendor-specific logic binds to *any* matching service,
 not just the selected one. See [CAN keepalive ownership](#can-keepalive-ownership-only-if-you-need-it).
 
-**Will it work on an SE-F16-C?**
-Probably — nothing in the driver is model-specific, and the SE-F12-C,
-SE-G5.1 Pro B and SE-F5 Pro-C are all confirmed — but nobody has confirmed the
-SE-F16-C on hardware yet. See [Compatibility](#compatibility-and-tested-scope).
+**Will it work on my Deye model?**
+The SE-F12-C, SE-G5.1 Pro B, SE-F5 Pro-C and SE-F16-C are confirmed, and
+nothing in the driver is model-specific, so other Deye LV packs on the PCS CAN
+protocol probably work too, but they are unconfirmed until someone sends a
+capture. See [Compatibility](#compatibility-and-tested-scope).
 
 **Does it survive a Venus OS firmware update?**
 The source lives in `/data` and is restored by a `/data/rc.local` hook, which
