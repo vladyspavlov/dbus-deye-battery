@@ -50,6 +50,31 @@ fetch() {
     fi
 }
 
+# Every value below ends up in a sed expression and in a config file that
+# service/run sources as shell, so anything outside a plain character set is
+# refused before a single file is written (issue #15).
+matches() {
+    printf '%s\n' "$1" | grep -Eqx "$2"
+}
+
+validate_inputs() {
+    [ -z "${VERSION:-}" ] || matches "$VERSION" '[0-9]+(\.[0-9]+){1,3}' ||
+        fail "VERSION must look like 1.2.3, not '$VERSION'."
+    [ -z "${CAN_INTERFACE:-}" ] || matches "$CAN_INTERFACE" '[A-Za-z][A-Za-z0-9_.-]{0,14}' ||
+        fail "CAN_INTERFACE is not an interface name: '$CAN_INTERFACE'."
+    [ -z "${DEVICE_INSTANCE:-}" ] || matches "$DEVICE_INSTANCE" '[0-9]{1,5}' ||
+        fail "DEVICE_INSTANCE must be a number, not '$DEVICE_INSTANCE'."
+    [ -z "${AUTO_DEVICE_INSTANCE:-}" ] || matches "$AUTO_DEVICE_INSTANCE" '[01]' ||
+        fail "AUTO_DEVICE_INSTANCE must be 0 or 1, not '$AUTO_DEVICE_INSTANCE'."
+    [ -z "${SERVICE_NAME:-}" ] ||
+        matches "$SERVICE_NAME" 'com\.victronenergy\.battery\.[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*' ||
+        fail "SERVICE_NAME must be com.victronenergy.battery.<name>, not '$SERVICE_NAME'."
+    [ -z "${MODEL:-}" ] || matches "$MODEL" '[A-Za-z0-9][A-Za-z0-9 ._+()/-]{0,39}' ||
+        fail "MODEL may use letters, digits, spaces and . _ + ( ) / - only (40 at most)."
+    [ -z "${SHA256:-}" ] || matches "$SHA256" '[0-9a-fA-F]{64}' ||
+        fail "SHA256 must be 64 hex digits."
+}
+
 latest_version() {
     tmp=$1
     fetch "https://api.github.com/repos/$REPO/releases/latest" "$tmp" ||
@@ -81,6 +106,7 @@ compare_versions() {
 
 main() {
     require_venus
+    validate_inputs
 
     work=$BASE/.deye-bootstrap.$$
     mkdir -p "$work"

@@ -97,6 +97,11 @@ elif ! grep -q deye-virtual-battery /data/rc.local; then
     echo "The service will not start automatically until you do." >&2
 fi
 
+# The service sources the config as shell, as root, so nothing in the tree
+# may be writable by anyone else (issue #15).
+chmod go-w "$root" "$root/config"
+chmod -R go-w "$root/src" "$root/service"
+
 # Start it now.  /service is a tmpfs, so this link is re-made by rc.local.
 if [ ! -e /service/deye-virtual-battery ]; then
     ln -s "$root/service" /service/deye-virtual-battery
