@@ -47,9 +47,10 @@ DEVICE_SETTINGS_ID=
 # cosmetic.  Leave empty for a generic name.
 MODEL=
 
-# Series cell count to assume ONLY if it cannot be measured from the pack and
-# cell voltages.  Normally leave this alone: the count is measured on the fly,
-# and every pack voltage threshold scales from it.
+# Series cell count of the pack.  Every pack voltage threshold scales from it.
+# When set, it is used as is and never measured.  When empty, the count is
+# measured once at startup and accepted only if exactly one count fits the
+# cell voltages; otherwise 16 is assumed.  Setting it is the safest choice.
 CELL_COUNT=
 
 # VE.Bus service used for the DC voltage cross-check.  Leave empty to discover

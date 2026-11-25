@@ -220,10 +220,23 @@ def _product_name(model: str | None) -> str:
     return model if model.lower().startswith("deye") else f"Deye {model}"
 
 
+def _cell_count_source(config: PolicyConfig) -> str:
+    if config.cell_count_detected:
+        return "measured"
+    if config.cell_count_fixed:
+        return "configured"
+    return "assumed"
+
+
+def _apply_policy_config(core: VenusPublisherCore, config: PolicyConfig) -> None:
+    core.policy_config = config
+    core.shadow.policy_config = config
+
+
 def _hardware_version(config: PolicyConfig, model: str | None) -> str:
     """Describe the pack from what was measured, not from an assumption."""
     series = f"{config.cell_count}s"
-    if not config.cell_count_detected:
+    if not config.cell_count_detected and not config.cell_count_fixed:
         series += " (assumed)"
     model = (model or "").strip()
     return f"{model} {series}".strip()
@@ -477,9 +490,9 @@ def run(arguments: argparse.Namespace) -> int:
         product_id=PRODUCT_ID, device_instance=arguments.device_instance
     )
     if arguments.cell_count:
-        config = replace(
-            config, cell_count=arguments.cell_count, fallback_cell_count=arguments.cell_count
-        )
+        # A configured count is authoritative.  It used to be only a fallback,
+        # so a wide cell spread could still override it (issue #15).
+        config = config.with_cell_count(arguments.cell_count)
     core = VenusPublisherCore(policy_config=config)
     runtime_clock = RuntimeClock()
     service = None
@@ -495,11 +508,14 @@ def run(arguments: argparse.Namespace) -> int:
         assert core.last_model is not None
         # Publish thresholds for the pack actually on the wire, not for a
         # model this code was written against.
-        config = config.for_pack(core.last_model.get("fields", {}))
+        config = config.locked_to_pack(core.last_model.get("fields", {}))
+        # The policy evaluated on every update uses the same count, so the
+        # limits and the published thresholds can never disagree.
+        _apply_policy_config(core, config)
         logging.info(
             "pack series count: %ss (%s)",
             config.cell_count,
-            "measured" if config.cell_count_detected else "assumed",
+            _cell_count_source(config),
         )
         serial = core.last_model["paths"].get("/Serial")
         resolution = _resolve_instance(bus, arguments, serial=serial)
@@ -651,8 +667,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--cell-count",
         type=int,
         default=None,
-        help="series cell count to assume if it cannot be measured from the "
-        "pack and cell voltages (default 16)",
+        help="series cell count of the pack. When given it is used as is and "
+        "never measured. When omitted the count is measured once at startup "
+        "and only accepted if exactly one count fits the cell voltages; "
+        "otherwise 16 is assumed until one does",
     )
     parser.add_argument("--log-level", default="INFO")
     return parser

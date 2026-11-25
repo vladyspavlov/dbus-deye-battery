@@ -233,7 +233,7 @@ What the driver measures for itself:
 | Property | Source |
 |---|---|
 | Nominal capacity | `0x35E` bytes 6-7 |
-| Series cell count | pack voltage ÷ mean cell voltage, cross-checked |
+| Series cell count | the one count whose mean cell lies between the lowest and highest cell, measured at startup |
 | Pack voltage thresholds | series count × per-cell limits |
 | Protocol profile | frames present on the wire |
 | Current sign | follows the detected profile |
@@ -241,10 +241,7 @@ What the driver measures for itself:
 | Firmware marker | `0x500` / `0x363` / `0x35F` |
 | Packs in a parallel bank | `0x364` and the per-pack frames present on the wire |
 
-If the series count cannot be measured — cell voltages missing, or the numbers
-disagree — the driver falls back to 16 and publishes `/HardwareVersion` as
-`… (assumed)` rather than pretending it measured something. Override with
-`CELL_COUNT=` if your pack is different and its cell data is unavailable.
+The series count is measured once, when the driver starts, and then kept: a pack does not change its series count while it runs. A count is only accepted when exactly one count fits, meaning the mean cell voltage it implies lies between the lowest and highest cell. With a wide cell spread more than one count can fit (a 16s pack with one cell 0.25 V below the rest also fits 17s), and the driver then refuses to guess. If the count cannot be measured (cell voltages missing, or more than one count fits) the driver uses 16 and publishes `/HardwareVersion` as `... (assumed)` rather than pretending it measured something. Set `CELL_COUNT=` if your pack is not 16s: a configured count is used as is and never measured.
 
 ### Parallel banks (several packs on one PCS port)
 
