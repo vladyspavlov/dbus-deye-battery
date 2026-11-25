@@ -108,8 +108,9 @@ main() {
     require_venus
     validate_inputs
 
-    work=$BASE/.deye-bootstrap.$$
-    mkdir -p "$work"
+    # An unpredictable name, created only if it does not already exist.
+    work=$(mktemp -d "$BASE/.deye-bootstrap.XXXXXX") ||
+        fail "Could not create a working directory under $BASE."
     # shellcheck disable=SC2064
     trap "rm -rf '$work'" EXIT HUP INT TERM
 

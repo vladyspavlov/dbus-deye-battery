@@ -79,7 +79,8 @@ for interface in $interfaces; do
     frames=""
     deye=no
     if [ "$state" = up ]; then
-        tmp=/tmp/deye-detect-$interface.$$
+        # An unpredictable name, created only if absent (issue #15).
+        tmp=$(mktemp "${TMPDIR:-/tmp}/deye-detect-$interface.XXXXXX")
         sniff "$interface" "$tmp"
         frames=$(wc -l < "$tmp" 2>/dev/null | tr -d ' ')
         # 351 (limits), 355 (SOC), 356 (measurements) and 35E (identity) are
