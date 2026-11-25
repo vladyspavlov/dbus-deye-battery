@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import replace
 import logging
+import os
 import re
 from pathlib import Path
 import select
@@ -53,6 +54,7 @@ from .venus_runtime import (
     VenusPublisherCore,
 )
 from .version import PROCESS_VERSION
+from .watchdog import StallWatchdog
 
 
 SERVICE_NAME = "com.victronenergy.battery.deye_lv"
@@ -73,9 +75,21 @@ def _unwrap(value: Any) -> Any:
     return getattr(value, "real", value) if not isinstance(value, bool) else value
 
 
+#: Upper bound on one D-Bus read.  dbus-python waits 25 s by default, so a
+#: single unresponsive service could hold the update loop that long while the
+#: last limits stayed published.  A read that times out is treated like a
+#: missing value.
+DBUS_CALL_TIMEOUT_SECONDS = 5.0
+
+
 def _get_value(bus: Any, service_name: str, path: str) -> Any:
     item = bus.get_object(service_name, path)
-    return _unwrap(item.GetValue(dbus_interface="com.victronenergy.BusItem"))
+    return _unwrap(
+        item.GetValue(
+            dbus_interface="com.victronenergy.BusItem",
+            timeout=DBUS_CALL_TIMEOUT_SECONDS,
+        )
+    )
 
 
 def _read_number(bus: Any, service_name: str, path: str) -> float | None:
@@ -138,8 +152,11 @@ def _qualify(
     deadline: float,
     runtime_clock: RuntimeClock,
     vebus: VebusLocator,
+    watchdog: StallWatchdog | None = None,
 ) -> None:
     while time.monotonic() < deadline:
+        if watchdog is not None:
+            watchdog.beat()
         ready, _, _ = select.select([can_socket], [], [], 0.25)
         if ready:
             _drain_can(can_socket, core, runtime_clock.now)
@@ -479,10 +496,13 @@ def run(arguments: argparse.Namespace) -> int:
     if arguments.require_no_bms_control and _read_bms_instance(bus) != NO_BMS_CONTROL:
         raise RuntimeError("BmsInstance must be -255 for unselected discovery")
     can_socket = _open_passive_can(arguments.interface)
+    watchdog = StallWatchdog(on_stall=_exit_on_stall)
+    watchdog.start()
     transmitter = KeepaliveTransmitter(
         interface=arguments.interface,
         feature_enabled=arguments.allow_can_transmit,
         enable_file=arguments.can_tx_enable_file,
+        publisher_alive=watchdog.alive,
     )
     transmitter.start()
     vebus = VebusLocator(explicit=arguments.vebus_service, clock=time.monotonic)
@@ -504,7 +524,9 @@ def run(arguments: argparse.Namespace) -> int:
             deadline=time.monotonic() + arguments.qualification_seconds,
             runtime_clock=runtime_clock,
             vebus=vebus,
+            watchdog=watchdog,
         )
+        watchdog.beat()
         assert core.last_model is not None
         # Publish thresholds for the pack actually on the wire, not for a
         # model this code was written against.
@@ -533,6 +555,7 @@ def run(arguments: argparse.Namespace) -> int:
             resolution=resolution,
         )
         service.register()
+        watchdog.beat()
         main_loop = GLib.MainLoop()
         started = time.monotonic()
         heartbeat = 0
@@ -542,6 +565,7 @@ def run(arguments: argparse.Namespace) -> int:
         def update() -> bool:
             nonlocal heartbeat, update_index, update_error
             try:
+                watchdog.beat()
                 _drain_can(can_socket, core, runtime_clock.now)
                 now = runtime_clock.now()
                 model = core.step(
@@ -612,8 +636,21 @@ def run(arguments: argparse.Namespace) -> int:
         # before a supervised service is intentionally stopped.
         service = None
         transmitter.stop()
+        watchdog.stop()
         can_socket.close()
     return 0
+
+
+def _exit_on_stall(age: float) -> None:
+    """Leave at once; a frozen loop cannot be trusted to unwind.
+
+    The keepalive has already stopped (it asks the watchdog on every poll).
+    Exiting drops the D-Bus name, so systemcalc sees the BMS vanish rather
+    than keep its last limits, and the supervisor restarts the service.
+    """
+    logging.critical("exiting so the service restarts after a %.1f s stall", age)
+    logging.shutdown()
+    os._exit(75)
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -103,8 +103,19 @@ class StockDriverWatch:
         return self._running
 
 
-def ownership_allowed(*, feature_enabled: bool, armed: bool, stock_running: bool) -> bool:
-    return bool(feature_enabled and armed and not stock_running)
+def ownership_allowed(
+    *,
+    feature_enabled: bool,
+    armed: bool,
+    stock_running: bool,
+    publisher_alive: bool = True,
+) -> bool:
+    """TX needs consent, arming, no stock driver, and a publisher that runs.
+
+    The last condition keeps the keepalive from vouching for limits that a
+    stalled update loop is no longer refreshing (issue #15).
+    """
+    return bool(feature_enabled and armed and not stock_running and publisher_alive)
 
 
 def _open_tx_socket(interface: str) -> socket.socket:
@@ -140,8 +151,11 @@ class KeepaliveTransmitter:
         socket_factory: Callable[[str], Any] = _open_tx_socket,
         period_seconds: float = 1.0,
         poll_seconds: float = 0.05,
+        publisher_alive: Callable[[], bool] | None = None,
     ) -> None:
         self.interface = interface
+        # Asked on every poll; None means there is no publisher to watch.
+        self.publisher_alive = publisher_alive
         # The command-line flag enables the feature for the life of the
         # process; the enable file enables it only while it exists.
         self.feature_flag = bool(feature_enabled)
@@ -241,6 +255,9 @@ class KeepaliveTransmitter:
             feature_enabled=feature_enabled,
             armed=armed,
             stock_running=stock_running,
+            publisher_alive=(
+                self.publisher_alive() if self.publisher_alive is not None else True
+            ),
         )
         with self._lock:
             self._feature_enabled = feature_enabled
