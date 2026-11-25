@@ -470,7 +470,7 @@ DRY_RUN=1 sh bootstrap.sh       # скаже, що зробило б, і ніч�
 sh bootstrap.sh
 
 # 2. Зафіксувати архів релізу контрольною сумою, яку ви отримали самі.
-VERSION=0.8.2 SHA256=<sha256 архіву> sh bootstrap.sh
+VERSION=0.8.3 SHA256=<sha256 архіву> sh bootstrap.sh
 
 # 3. Взагалі обійтися без bootstrap і зробити все вручну — див. нижче.
 ```
@@ -584,7 +584,7 @@ VRM, завжди відображається на конкретний код,
 поводиться дивно о 2-й ночі.
 
 ```sh
-VERSION=0.8.2          # актуальну дивіться на сторінці Releases
+VERSION=0.8.3          # актуальну дивіться на сторінці Releases
 
 cd /data
 wget -O deye.tar.gz https://github.com/vladyspavlov/dbus-deye-battery/archive/refs/tags/v$VERSION.tar.gz
