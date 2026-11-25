@@ -90,12 +90,27 @@ def test_bootstrap_survives_a_truncated_download():
     assert "set -eu" in BOOTSTRAP
 
 
-@pytest.mark.parametrize("name", ["bootstrap.sh", "detect-can-interface.sh"])
+# Every shell script that ships to a GX, not only the two a user runs first:
+# rollback-can-owner is what runs when something has already gone wrong.
+SHELL_SCRIPTS = [
+    "bootstrap.sh",
+    "detect-can-interface.sh",
+    "install.sh",
+    "uninstall.sh",
+    "rc.local",
+    "service/run",
+    "service/log/run",
+    "service/handoff-can-owner",
+    "service/rollback-can-owner",
+]
+
+
+@pytest.mark.parametrize("name", SHELL_SCRIPTS)
 def test_installer_scripts_parse_as_posix_shell(name: str):
     subprocess.run(["sh", "-n", str(ROOT / "install" / name)], check=True)
 
 
-@pytest.mark.parametrize("name", ["bootstrap.sh", "detect-can-interface.sh"])
+@pytest.mark.parametrize("name", SHELL_SCRIPTS)
 def test_installer_scripts_parse_as_busybox_ash(name: str):
     # /bin/sh on a GX is BusyBox ash, so a bashism that dash tolerates is not
     # enough of a check.
