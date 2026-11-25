@@ -25,6 +25,7 @@ from pathlib import Path
 import select
 import signal
 import socket
+import struct
 import sys
 import time
 from typing import Any, Callable
@@ -118,26 +119,80 @@ def _read_vebus_voltage(bus: Any, locator: VebusLocator) -> float | None:
     return read_vebus_voltage(bus, locator, _read_number)
 
 
+#: Linux SO_TIMESTAMP (asm-generic, also used on ARM).  The standard library
+#: does not export it.  The kernel then attaches the receive time of every
+#: frame as a native ``struct timeval``.
+SO_TIMESTAMP = 29
+TIMEVAL_FORMAT = "@ll"
+TIMEVAL_SIZE = struct.calcsize(TIMEVAL_FORMAT)
+#: Frames read per drain.  The CAN watch fires again while more are queued, so
+#: a busy bus can never keep one call (and the update loop) busy for long.
+MAX_FRAMES_PER_DRAIN = 1000
+#: A backlog older than this is aged to this value only.  Cache freshness is a
+#: few seconds, so such a frame is stale either way; the clamp only stops a
+#: realtime clock step from producing a nonsensical age.
+MAX_FRAME_AGE_SECONDS = 60.0
+
+
 def _open_passive_can(interface: str) -> socket.socket:
     can_socket = socket.socket(socket.PF_CAN, socket.SOCK_RAW, socket.CAN_RAW)
     can_socket.setblocking(False)
+    try:
+        can_socket.setsockopt(socket.SOL_SOCKET, SO_TIMESTAMP, 1)
+    except OSError as error:
+        logging.warning("kernel CAN receive timestamps unavailable: %s", error)
     can_socket.bind((interface,))
     return can_socket
+
+
+def _kernel_receive_time(ancillary: list[tuple[int, int, bytes]]) -> float | None:
+    for level, kind, data in ancillary:
+        if level == socket.SOL_SOCKET and kind == SO_TIMESTAMP and len(data) >= TIMEVAL_SIZE:
+            seconds, microseconds = struct.unpack(TIMEVAL_FORMAT, data[:TIMEVAL_SIZE])
+            return seconds + microseconds / 1_000_000
+    return None
+
+
+def frame_timestamp(
+    received_wall: float | None,
+    *,
+    now: float,
+    wall_now: float,
+) -> float:
+    """Place a frame on the runtime clock at the time it was received.
+
+    Frames used to be stamped when they were read.  After any pause of the
+    update loop, a queue of old frames was then taken for fresh data (issue
+    #15).  The kernel receive time is wall-clock, so only its age is used,
+    applied to the progressing runtime clock.
+    """
+    if received_wall is None:
+        return now
+    age = min(max(0.0, wall_now - received_wall), MAX_FRAME_AGE_SECONDS)
+    return now - age
 
 
 def _drain_can(
     can_socket: socket.socket,
     core: VenusPublisherCore,
     timestamp: Callable[[], float] = time.time,
+    *,
+    wall_time: Callable[[], float] = time.time,
+    max_frames: int = MAX_FRAMES_PER_DRAIN,
 ) -> int:
     accepted = 0
-    while True:
+    for _ in range(max_frames):
         try:
-            raw = can_socket.recv(CAN_FRAME_SIZE)
+            raw, ancillary, _flags, _address = can_socket.recvmsg(
+                CAN_FRAME_SIZE, socket.CMSG_SPACE(TIMEVAL_SIZE)
+            )
         except BlockingIOError:
             break
+        stamp = frame_timestamp(
+            _kernel_receive_time(ancillary), now=timestamp(), wall_now=wall_time()
+        )
         try:
-            core.apply_raw_frame(raw, timestamp=timestamp())
+            core.apply_raw_frame(raw, timestamp=stamp)
         except SocketCanFrameError:
             continue
         accepted += 1
