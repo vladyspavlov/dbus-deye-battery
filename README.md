@@ -607,6 +607,8 @@ first, leaves your config alone, and refuses to go backwards unless you say
 `ALLOW_DOWNGRADE=1`. To roll back, point the source directory at one of the
 `.backup-src-*` trees the installer kept and restart the service.
 
+The running driver is then restarted so the new code takes effect, which leaves the GX without BMS data for a few seconds (VE.Bus keeps its operational limits for 300 s). A driver you stopped yourself is left stopped. To choose the moment yourself, run the command with `RESTART_SERVICE=0` and later `svc -t /service/deye-virtual-battery`. The service scripts and the config are backed up to `.backup-service-*` beside the source backup.
+
 ### Check it is healthy
 
 ```sh

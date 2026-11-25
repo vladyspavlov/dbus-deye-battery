@@ -15,6 +15,8 @@
 #   SERVICE_NAME=...     change only if you run more than one pack
 #   SHA256=<hex>         refuse the download unless it matches
 #   ALLOW_DOWNGRADE=1    permit installing older code than is running
+#   RESTART_SERVICE=0    on an upgrade, leave the running driver on the old
+#                        code until you restart it yourself
 #   DRY_RUN=1            show what would happen and stop
 #
 # Installing changes nothing about how your system charges or discharges.  The
@@ -161,7 +163,7 @@ main() {
     rm -f "$BASE/dbus-deye-battery"
     ln -s "$kept" "$BASE/dbus-deye-battery"
 
-    sh "$kept/install/install.sh"
+    RESTART_SERVICE=${RESTART_SERVICE:-1} sh "$kept/install/install.sh"
 
     # Settings are only seeded on a first install.  Rewriting them on an
     # upgrade could silently move a working system to a different CAN port or
