@@ -156,10 +156,15 @@ main() {
     # Keep the unpacked release: uninstall.sh and the rollback notes in the
     # README are written against a source tree, and the old ones are left
     # alone so an earlier release is always still on disk.
+    #
+    # A tree already kept for this same version is replaced by the download
+    # that was just verified.  It used to be reused as it was, so a damaged or
+    # altered copy on disk was what got installed (issue #15).
     kept=$BASE/dbus-deye-battery-$version
-    if [ ! -e "$kept" ]; then
-        cp -a "$source_dir" "$kept"
-    fi
+    rm -rf "$kept.new"
+    cp -a "$source_dir" "$kept.new"
+    rm -rf "$kept"
+    mv "$kept.new" "$kept"
     rm -f "$BASE/dbus-deye-battery"
     ln -s "$kept" "$BASE/dbus-deye-battery"
 
