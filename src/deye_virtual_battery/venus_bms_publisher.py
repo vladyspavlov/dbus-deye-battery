@@ -19,11 +19,13 @@ from __future__ import annotations
 import argparse
 from dataclasses import replace
 import logging
+import os
 import re
 from pathlib import Path
 import select
 import signal
 import socket
+import struct
 import sys
 import time
 from typing import Any, Callable
@@ -53,6 +55,7 @@ from .venus_runtime import (
     VenusPublisherCore,
 )
 from .version import PROCESS_VERSION
+from .watchdog import StallWatchdog
 
 
 SERVICE_NAME = "com.victronenergy.battery.deye_lv"
@@ -73,9 +76,21 @@ def _unwrap(value: Any) -> Any:
     return getattr(value, "real", value) if not isinstance(value, bool) else value
 
 
+#: Upper bound on one D-Bus read.  dbus-python waits 25 s by default, so a
+#: single unresponsive service could hold the update loop that long while the
+#: last limits stayed published.  A read that times out is treated like a
+#: missing value.
+DBUS_CALL_TIMEOUT_SECONDS = 5.0
+
+
 def _get_value(bus: Any, service_name: str, path: str) -> Any:
     item = bus.get_object(service_name, path)
-    return _unwrap(item.GetValue(dbus_interface="com.victronenergy.BusItem"))
+    return _unwrap(
+        item.GetValue(
+            dbus_interface="com.victronenergy.BusItem",
+            timeout=DBUS_CALL_TIMEOUT_SECONDS,
+        )
+    )
 
 
 def _read_number(bus: Any, service_name: str, path: str) -> float | None:
@@ -104,26 +119,80 @@ def _read_vebus_voltage(bus: Any, locator: VebusLocator) -> float | None:
     return read_vebus_voltage(bus, locator, _read_number)
 
 
+#: Linux SO_TIMESTAMP (asm-generic, also used on ARM).  The standard library
+#: does not export it.  The kernel then attaches the receive time of every
+#: frame as a native ``struct timeval``.
+SO_TIMESTAMP = 29
+TIMEVAL_FORMAT = "@ll"
+TIMEVAL_SIZE = struct.calcsize(TIMEVAL_FORMAT)
+#: Frames read per drain.  The CAN watch fires again while more are queued, so
+#: a busy bus can never keep one call (and the update loop) busy for long.
+MAX_FRAMES_PER_DRAIN = 1000
+#: A backlog older than this is aged to this value only.  Cache freshness is a
+#: few seconds, so such a frame is stale either way; the clamp only stops a
+#: realtime clock step from producing a nonsensical age.
+MAX_FRAME_AGE_SECONDS = 60.0
+
+
 def _open_passive_can(interface: str) -> socket.socket:
     can_socket = socket.socket(socket.PF_CAN, socket.SOCK_RAW, socket.CAN_RAW)
     can_socket.setblocking(False)
+    try:
+        can_socket.setsockopt(socket.SOL_SOCKET, SO_TIMESTAMP, 1)
+    except OSError as error:
+        logging.warning("kernel CAN receive timestamps unavailable: %s", error)
     can_socket.bind((interface,))
     return can_socket
+
+
+def _kernel_receive_time(ancillary: list[tuple[int, int, bytes]]) -> float | None:
+    for level, kind, data in ancillary:
+        if level == socket.SOL_SOCKET and kind == SO_TIMESTAMP and len(data) >= TIMEVAL_SIZE:
+            seconds, microseconds = struct.unpack(TIMEVAL_FORMAT, data[:TIMEVAL_SIZE])
+            return seconds + microseconds / 1_000_000
+    return None
+
+
+def frame_timestamp(
+    received_wall: float | None,
+    *,
+    now: float,
+    wall_now: float,
+) -> float:
+    """Place a frame on the runtime clock at the time it was received.
+
+    Frames used to be stamped when they were read.  After any pause of the
+    update loop, a queue of old frames was then taken for fresh data (issue
+    #15).  The kernel receive time is wall-clock, so only its age is used,
+    applied to the progressing runtime clock.
+    """
+    if received_wall is None:
+        return now
+    age = min(max(0.0, wall_now - received_wall), MAX_FRAME_AGE_SECONDS)
+    return now - age
 
 
 def _drain_can(
     can_socket: socket.socket,
     core: VenusPublisherCore,
     timestamp: Callable[[], float] = time.time,
+    *,
+    wall_time: Callable[[], float] = time.time,
+    max_frames: int = MAX_FRAMES_PER_DRAIN,
 ) -> int:
     accepted = 0
-    while True:
+    for _ in range(max_frames):
         try:
-            raw = can_socket.recv(CAN_FRAME_SIZE)
+            raw, ancillary, _flags, _address = can_socket.recvmsg(
+                CAN_FRAME_SIZE, socket.CMSG_SPACE(TIMEVAL_SIZE)
+            )
         except BlockingIOError:
             break
+        stamp = frame_timestamp(
+            _kernel_receive_time(ancillary), now=timestamp(), wall_now=wall_time()
+        )
         try:
-            core.apply_raw_frame(raw, timestamp=timestamp())
+            core.apply_raw_frame(raw, timestamp=stamp)
         except SocketCanFrameError:
             continue
         accepted += 1
@@ -138,8 +207,11 @@ def _qualify(
     deadline: float,
     runtime_clock: RuntimeClock,
     vebus: VebusLocator,
+    watchdog: StallWatchdog | None = None,
 ) -> None:
     while time.monotonic() < deadline:
+        if watchdog is not None:
+            watchdog.beat()
         ready, _, _ = select.select([can_socket], [], [], 0.25)
         if ready:
             _drain_can(can_socket, core, runtime_clock.now)
@@ -220,10 +292,23 @@ def _product_name(model: str | None) -> str:
     return model if model.lower().startswith("deye") else f"Deye {model}"
 
 
+def _cell_count_source(config: PolicyConfig) -> str:
+    if config.cell_count_detected:
+        return "measured"
+    if config.cell_count_fixed:
+        return "configured"
+    return "assumed"
+
+
+def _apply_policy_config(core: VenusPublisherCore, config: PolicyConfig) -> None:
+    core.policy_config = config
+    core.shadow.policy_config = config
+
+
 def _hardware_version(config: PolicyConfig, model: str | None) -> str:
     """Describe the pack from what was measured, not from an assumption."""
     series = f"{config.cell_count}s"
-    if not config.cell_count_detected:
+    if not config.cell_count_detected and not config.cell_count_fixed:
         series += " (assumed)"
     model = (model or "").strip()
     return f"{model} {series}".strip()
@@ -466,10 +551,13 @@ def run(arguments: argparse.Namespace) -> int:
     if arguments.require_no_bms_control and _read_bms_instance(bus) != NO_BMS_CONTROL:
         raise RuntimeError("BmsInstance must be -255 for unselected discovery")
     can_socket = _open_passive_can(arguments.interface)
+    watchdog = StallWatchdog(on_stall=_exit_on_stall)
+    watchdog.start()
     transmitter = KeepaliveTransmitter(
         interface=arguments.interface,
         feature_enabled=arguments.allow_can_transmit,
         enable_file=arguments.can_tx_enable_file,
+        publisher_alive=watchdog.alive,
     )
     transmitter.start()
     vebus = VebusLocator(explicit=arguments.vebus_service, clock=time.monotonic)
@@ -477,9 +565,9 @@ def run(arguments: argparse.Namespace) -> int:
         product_id=PRODUCT_ID, device_instance=arguments.device_instance
     )
     if arguments.cell_count:
-        config = replace(
-            config, cell_count=arguments.cell_count, fallback_cell_count=arguments.cell_count
-        )
+        # A configured count is authoritative.  It used to be only a fallback,
+        # so a wide cell spread could still override it (issue #15).
+        config = config.with_cell_count(arguments.cell_count)
     core = VenusPublisherCore(policy_config=config)
     runtime_clock = RuntimeClock()
     service = None
@@ -491,15 +579,20 @@ def run(arguments: argparse.Namespace) -> int:
             deadline=time.monotonic() + arguments.qualification_seconds,
             runtime_clock=runtime_clock,
             vebus=vebus,
+            watchdog=watchdog,
         )
+        watchdog.beat()
         assert core.last_model is not None
         # Publish thresholds for the pack actually on the wire, not for a
         # model this code was written against.
-        config = config.for_pack(core.last_model.get("fields", {}))
+        config = config.locked_to_pack(core.last_model.get("fields", {}))
+        # The policy evaluated on every update uses the same count, so the
+        # limits and the published thresholds can never disagree.
+        _apply_policy_config(core, config)
         logging.info(
             "pack series count: %ss (%s)",
             config.cell_count,
-            "measured" if config.cell_count_detected else "assumed",
+            _cell_count_source(config),
         )
         serial = core.last_model["paths"].get("/Serial")
         resolution = _resolve_instance(bus, arguments, serial=serial)
@@ -517,6 +610,7 @@ def run(arguments: argparse.Namespace) -> int:
             resolution=resolution,
         )
         service.register()
+        watchdog.beat()
         main_loop = GLib.MainLoop()
         started = time.monotonic()
         heartbeat = 0
@@ -526,6 +620,7 @@ def run(arguments: argparse.Namespace) -> int:
         def update() -> bool:
             nonlocal heartbeat, update_index, update_error
             try:
+                watchdog.beat()
                 _drain_can(can_socket, core, runtime_clock.now)
                 now = runtime_clock.now()
                 model = core.step(
@@ -596,8 +691,21 @@ def run(arguments: argparse.Namespace) -> int:
         # before a supervised service is intentionally stopped.
         service = None
         transmitter.stop()
+        watchdog.stop()
         can_socket.close()
     return 0
+
+
+def _exit_on_stall(age: float) -> None:
+    """Leave at once; a frozen loop cannot be trusted to unwind.
+
+    The keepalive has already stopped (it asks the watchdog on every poll).
+    Exiting drops the D-Bus name, so systemcalc sees the BMS vanish rather
+    than keep its last limits, and the supervisor restarts the service.
+    """
+    logging.critical("exiting so the service restarts after a %.1f s stall", age)
+    logging.shutdown()
+    os._exit(75)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -651,8 +759,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--cell-count",
         type=int,
         default=None,
-        help="series cell count to assume if it cannot be measured from the "
-        "pack and cell voltages (default 16)",
+        help="series cell count of the pack. When given it is used as is and "
+        "never measured. When omitted the count is measured once at startup "
+        "and only accepted if exactly one count fits the cell voltages; "
+        "otherwise 16 is assumed until one does",
     )
     parser.add_argument("--log-level", default="INFO")
     return parser

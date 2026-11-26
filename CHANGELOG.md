@@ -3,6 +3,22 @@
 Versions are strictly numeric: Venus OS and VRM display `/Mgmt/ProcessVersion`
 verbatim, so no suffixes or build tags appear here.
 
+## 0.8.3
+
+Fixes for the review in [#15](https://github.com/vladyspavlov/dbus-deye-battery/issues/15). Each finding below has a regression test in `tests/test_issue_15_audit.py`.
+
+### Fixed
+- **A 16s pack with one weak cell was taken for 17s, and the raw 58.4 V CVL passed through.** The series count was the pack voltage divided by the midpoint of the lowest and highest cell, rounded. With one cell well below the rest (fifteen at 3.35 V and one at 3.10 V is enough) both 16 and 17 fit the cells, rounding picked 17, every pack voltage ceiling rose by a cell, and the battery's own 58.4 V request was published unchanged with charge allowed and with charge blocked. A count is now accepted only when exactly one count fits, it is measured once at startup and then kept, and an ambiguous reading falls back to 16 instead of guessing. The per-cell 3.65 V charge stop was never affected.
+- **`CELL_COUNT` could be overridden by the measurement.** It was only a fallback. It now sets the count, which is never measured when it is given.
+- **A stalled update loop kept its last limits and the keepalive running.** A watchdog fed by every update stops the keepalive and exits the process after 30 s without one, so systemcalc sees the BMS disappear rather than freeze and runit starts a fresh process. D-Bus reads are bounded at 5 s instead of dbus-python's 25 s.
+- **Queued CAN frames were stamped as fresh when read.** Frames now carry their kernel receive time, so a backlog read after a pause is as old as it really is. One drain reads at most 1000 frames.
+- **A stock driver on another CAN port blocked the handoff.** Only a stock `can-bus-bms` on this driver's port, or one that cannot be attributed to any port, now inhibits the keepalive.
+- **`rollback-can-owner` gave up when the driver was not answering on D-Bus,** before starting the stock driver, which left nobody sending the keepalive. It now removes the TX markers, waits for a live driver to let go, and restores the stock driver even if the driver is gone. A driver that still claims the bus still stops it.
+- **An upgrade left the old code running.** `install.sh` ended with `svc -u`, which does nothing to a running process. A running driver is now restarted with `svc -t`, a stopped one is left stopped, and `RESTART_SERVICE=0` defers the restart. The service scripts and the config are backed up to `.backup-service-*` as well as the source.
+- **A reinstall of the same version ran the copy already on disk** instead of the download it had just verified. The kept tree is now replaced by the verified download.
+- **Config values were not checked before they reached `sed` and a config that is sourced as shell.** `CAN_INTERFACE`, `MODEL`, `DEVICE_INSTANCE`, `AUTO_DEVICE_INSTANCE`, `SERVICE_NAME`, `VERSION` and `SHA256` are now validated before anything is written, and the install tree is made writable by root only.
+- **Temporary files had guessable names.** The bootstrap work directory and the detector's capture file now come from `mktemp`.
+
 ## 0.8.2
 
 ### Fixed

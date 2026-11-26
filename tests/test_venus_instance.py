@@ -289,7 +289,7 @@ class FakeBus:
             raise RuntimeError("org.freedesktop.DBus.Error.UnknownObject")
 
         class Item:
-            def GetValue(self, dbus_interface=None):
+            def GetValue(self, dbus_interface=None, timeout=None):
                 return values[key]
 
         return Item()
@@ -436,7 +436,7 @@ def test_two_packs_come_up_as_513_and_514_with_no_configuration():
                 value = store[path]
 
                 class Item:
-                    def GetValue(self, dbus_interface=None):
+                    def GetValue(self, dbus_interface=None, timeout=None):
                         return value
 
                 return Item()

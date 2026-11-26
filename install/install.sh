@@ -31,6 +31,22 @@ if [ -d "$root/src" ]; then
     echo "backing up existing source to $backup"
     cp -a "$root/src" "$backup"
 fi
+# The service scripts and the config are replaced or edited below, so they are
+# kept too.  Only the files: service/supervise is runit's live state.
+if [ -d "$root/service" ] || [ -f "$root/config" ]; then
+    service_backup=$root/.backup-service-$stamp
+    echo "backing up existing service scripts and config to $service_backup"
+    mkdir -p "$service_backup/log"
+    for file in run handoff-can-owner rollback-can-owner log/run; do
+        [ -f "$root/service/$file" ] && cp -p "$root/service/$file" "$service_backup/$file"
+    done
+    [ -f "$root/config" ] && cp -p "$root/config" "$service_backup/config"
+fi
+
+# Was the driver already installed and supervised?  Decides below whether the
+# new code has to be loaded by restarting the running process.
+upgrade=0
+[ -e /service/deye-virtual-battery ] && upgrade=1
 
 mkdir -p "$root/src" "$root/service/log" /data/log/deye-virtual-battery
 
@@ -81,12 +97,32 @@ elif ! grep -q deye-virtual-battery /data/rc.local; then
     echo "The service will not start automatically until you do." >&2
 fi
 
+# The service sources the config as shell, as root, so nothing in the tree
+# may be writable by anyone else (issue #15).
+chmod go-w "$root" "$root/config"
+chmod -R go-w "$root/src" "$root/service"
+
 # Start it now.  /service is a tmpfs, so this link is re-made by rc.local.
 if [ ! -e /service/deye-virtual-battery ]; then
     ln -s "$root/service" /service/deye-virtual-battery
 fi
 sleep 5
-svc -u /service/deye-virtual-battery 2>/dev/null || true
+if [ "$upgrade" = 1 ]; then
+    # "svc -u" does nothing to a process that is already up, so an upgrade
+    # used to leave the old code running until some later restart (issue
+    # #15).  "svc -t" restarts a running driver and leaves one that the
+    # operator stopped alone.  Expect a few seconds without BMS data; VE.Bus
+    # keeps its limits for 300 s.
+    if [ "${RESTART_SERVICE:-1}" = 1 ]; then
+        echo "restarting the running driver so the new code takes effect"
+        svc -t /service/deye-virtual-battery 2>/dev/null || true
+    else
+        echo "RESTART_SERVICE=0: the running driver keeps the old code until"
+        echo "you run: svc -t /service/deye-virtual-battery"
+    fi
+else
+    svc -u /service/deye-virtual-battery 2>/dev/null || true
+fi
 
 echo
 echo "installed. version: $(sed -n 's/^VERSION = "\(.*\)"/\1/p' "$root/src/deye_virtual_battery/version.py")"

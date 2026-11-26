@@ -32,34 +32,96 @@ STOCK_DRIVER_EXE = "/opt/victronenergy/can-bus-bms/can-bus-bms"
 STOCK_RESCAN_SECONDS = 1.0
 
 
-def find_stock_driver(executable: str = STOCK_DRIVER_EXE) -> tuple[bool, str | None]:
-    """Return whether the exact stock binary is running, and its pid if found."""
+STOCK_SERVICE_PREFIX = "can-bus-bms."
+PROC_ROOT = "/proc"
+
+
+def find_stock_driver(
+    executable: str = STOCK_DRIVER_EXE,
+    *,
+    interface: str | None = None,
+    proc_root: str = PROC_ROOT,
+) -> tuple[bool, str | None]:
+    """Return whether the stock binary runs on ``interface``, and its pid.
+
+    The stock driver runs once per CAN port (``can-bus-bms.can0``,
+    ``can-bus-bms.can1``).  A GX with a BMS on each port used to count the
+    other port's driver as a reason not to transmit, which blocked the handoff
+    forever (issue #15).  A process is attributed to a port by its runit
+    service directory, or failing that by its arguments.  A process that
+    cannot be attributed still counts as running here: failure to prove that
+    the stock driver is absent must inhibit TX.
+    """
 
     try:
-        process_entries = os.scandir("/proc")
+        process_entries = os.scandir(proc_root)
     except OSError:
-        # Failure to prove that the stock driver is absent must inhibit TX.
         return True, None
     with process_entries:
         for entry in process_entries:
             if not entry.name.isdigit():
                 continue
-            if _process_executable(entry.name) == executable:
+            if _process_executable(entry.name, proc_root) != executable:
+                continue
+            if interface is None or _process_may_drive(entry.name, interface, proc_root):
                 return True, entry.name
     return False, None
 
 
-def _process_executable(pid: str) -> str | None:
+def _process_executable(pid: str, proc_root: str = PROC_ROOT) -> str | None:
     try:
-        return os.readlink(f"/proc/{pid}/exe")
+        return os.readlink(f"{proc_root}/{pid}/exe")
     except OSError:
         return None
 
 
-def stock_driver_running(executable: str = STOCK_DRIVER_EXE) -> bool:
+def stock_driver_interfaces(pid: str, proc_root: str = PROC_ROOT) -> set[str] | None:
+    """The CAN ports a stock driver process names, or None if it names none."""
+
+    try:
+        directory = os.path.basename(os.readlink(f"{proc_root}/{pid}/cwd"))
+    except OSError:
+        directory = ""
+    if directory.startswith(STOCK_SERVICE_PREFIX) and len(directory) > len(
+        STOCK_SERVICE_PREFIX
+    ):
+        return {directory[len(STOCK_SERVICE_PREFIX):]}
+    try:
+        with open(f"{proc_root}/{pid}/cmdline", "rb") as handle:
+            arguments = handle.read().split(b"\0")
+    except OSError:
+        return None
+    named: set[str] = set()
+    for argument in arguments[1:]:
+        text = argument.decode("utf-8", "replace")
+        # socketcan:can0, can0, or a path ending in can-bus-bms.can0
+        candidate = text.rsplit(":", 1)[-1].rsplit("/", 1)[-1]
+        if candidate.startswith(STOCK_SERVICE_PREFIX):
+            candidate = candidate[len(STOCK_SERVICE_PREFIX):]
+        if _looks_like_can_interface(candidate):
+            named.add(candidate)
+    return named or None
+
+
+def _looks_like_can_interface(name: str) -> bool:
+    return (
+        name.startswith(("can", "vcan", "slcan"))
+        and len(name) <= 15
+        and name.replace("_", "").replace("-", "").replace(".", "").isalnum()
+    )
+
+
+def _process_may_drive(pid: str, interface: str, proc_root: str = PROC_ROOT) -> bool:
+    named = stock_driver_interfaces(pid, proc_root)
+    return named is None or interface in named
+
+
+def stock_driver_running(
+    executable: str = STOCK_DRIVER_EXE, *, interface: str | None = None
+) -> bool:
     """Return true only for a live process executing the exact stock binary."""
 
-    return find_stock_driver(executable)[0]
+    return find_stock_driver(executable, interface=interface)[0]
 
 
 class StockDriverWatch:
@@ -77,10 +139,14 @@ class StockDriverWatch:
         self,
         executable: str = STOCK_DRIVER_EXE,
         *,
+        interface: str | None = None,
         rescan_seconds: float = STOCK_RESCAN_SECONDS,
         clock: Callable[[], float] = time.monotonic,
+        proc_root: str = PROC_ROOT,
     ) -> None:
         self.executable = executable
+        self.interface = interface
+        self.proc_root = proc_root
         self.rescan_seconds = float(rescan_seconds)
         self.clock = clock
         self._pid: str | None = None
@@ -90,21 +156,34 @@ class StockDriverWatch:
 
     def __call__(self, *, fresh: bool = False) -> bool:
         if self._pid is not None:
-            if _process_executable(self._pid) == self.executable:
+            if _process_executable(self._pid, self.proc_root) == self.executable:
                 return True
             # It has just exited; another instance may still be running.
             self._pid = None
             fresh = True
         now = self.clock()
         if fresh or self._next_scan is None or now >= self._next_scan:
-            self._running, self._pid = find_stock_driver(self.executable)
+            self._running, self._pid = find_stock_driver(
+                self.executable, interface=self.interface, proc_root=self.proc_root
+            )
             self._next_scan = now + self.rescan_seconds
             self.scans += 1
         return self._running
 
 
-def ownership_allowed(*, feature_enabled: bool, armed: bool, stock_running: bool) -> bool:
-    return bool(feature_enabled and armed and not stock_running)
+def ownership_allowed(
+    *,
+    feature_enabled: bool,
+    armed: bool,
+    stock_running: bool,
+    publisher_alive: bool = True,
+) -> bool:
+    """TX needs consent, arming, no stock driver, and a publisher that runs.
+
+    The last condition keeps the keepalive from vouching for limits that a
+    stalled update loop is no longer refreshing (issue #15).
+    """
+    return bool(feature_enabled and armed and not stock_running and publisher_alive)
 
 
 def _open_tx_socket(interface: str) -> socket.socket:
@@ -140,8 +219,11 @@ class KeepaliveTransmitter:
         socket_factory: Callable[[str], Any] = _open_tx_socket,
         period_seconds: float = 1.0,
         poll_seconds: float = 0.05,
+        publisher_alive: Callable[[], bool] | None = None,
     ) -> None:
         self.interface = interface
+        # Asked on every poll; None means there is no publisher to watch.
+        self.publisher_alive = publisher_alive
         # The command-line flag enables the feature for the life of the
         # process; the enable file enables it only while it exists.
         self.feature_flag = bool(feature_enabled)
@@ -149,7 +231,9 @@ class KeepaliveTransmitter:
         self.enable_file = enable_file
         # Called on every poll, and with ``fresh=True`` right before a send.
         self.stock_detector = (
-            stock_detector if stock_detector is not None else StockDriverWatch()
+            stock_detector
+            if stock_detector is not None
+            else StockDriverWatch(interface=interface)
         )
         self.socket_factory = socket_factory
         self.period_seconds = float(period_seconds)
@@ -241,6 +325,9 @@ class KeepaliveTransmitter:
             feature_enabled=feature_enabled,
             armed=armed,
             stock_running=stock_running,
+            publisher_alive=(
+                self.publisher_alive() if self.publisher_alive is not None else True
+            ),
         )
         with self._lock:
             self._feature_enabled = feature_enabled

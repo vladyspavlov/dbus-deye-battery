@@ -239,24 +239,26 @@ def detect_cell_count(fields: dict[str, Any], fallback: int) -> tuple[int, bool]
     The adapter is not tied to one model.  SE-F5, SE-F12 and SE-F16 differ in
     capacity and series count, and capacity already comes off the wire, so the
     only remaining model-specific number is how many cells are in series.
-    Dividing the pack voltage by the mean cell voltage gives it directly.
 
     Returns ``(count, detected)``.  ``detected`` is False when the inputs are
-    missing or do not agree, in which case the caller's fallback is used and
-    the adapter says so rather than pretending it measured something.
+    missing or do not determine a single count, in which case the caller's
+    fallback is used and the adapter says so rather than pretending it
+    measured something.
 
-    The count is only accepted if the per-cell voltage it implies actually
-    lies between the reported minimum and maximum cell.  That has to be true
-    of the real count -- a mean cannot fall outside its own extremes -- and it
-    is what makes the answer trustworthy: a partially stale snapshot pairing
-    one frame's pack voltage with another's cell voltages lands outside the
-    bracket, and so does every neighbouring count.
+    A count ``n`` is consistent only if the mean cell voltage it implies,
+    ``pack / n``, lies between the reported minimum and maximum cell: a mean
+    cannot fall outside its own extremes, so the true count always passes.
+    The answer is accepted only when exactly one count passes.  With a wide
+    spread several counts can fit the bracket, and rounding ``pack`` divided
+    by the midpoint of the extremes then picks the wrong one: a 16s pack with
+    fifteen cells at 3.35 V and one weak cell at 3.10 V gives 16.88, which
+    rounds to 17, and 17 cells of 3.157 V also lie inside the bracket.  A
+    17s reading raises every pack voltage ceiling by a cell's worth and let
+    the battery's raw 58.4 V CVL through unchanged (issue #15).  Ambiguity is
+    therefore treated as "not measured", never resolved by a guess.
 
-    An earlier version compared the count against a fixed 0.25 V residual from
-    the mean of the two extremes.  That mean is a biased estimator whenever the
-    cells are unevenly spread, and on the reference 16s pack -- 54.5 V with
-    cells at 3.352 and 3.524 -- the bias is 0.51 V, so the correct count was
-    rejected and every pack fell back to the assumed 16.
+    A partially stale snapshot pairing one frame's pack voltage with another's
+    cell voltages usually leaves no consistent count at all, and falls back.
     """
     pack_voltage = _number(fields, "battery.voltage")
     maximum = _maximum_effective(fields, ("cells.max_voltage_200", "cells.max_voltage_361"))
@@ -265,18 +267,23 @@ def detect_cell_count(fields: dict[str, Any], fallback: int) -> tuple[int, bool]
         return fallback, False
     if minimum <= 0.5 or maximum < minimum:
         return fallback, False
-    mean_cell = (maximum + minimum) / 2.0
-    count = int(round(pack_voltage / mean_cell))
-    if not MINIMUM_CELL_COUNT <= count <= MAXIMUM_CELL_COUNT:
+    candidates = consistent_cell_counts(pack_voltage, minimum, maximum)
+    if len(candidates) != 1:
         return fallback, False
-    implied_cell = pack_voltage / count
-    if not (
-        minimum - CELL_BRACKET_MARGIN_V
-        <= implied_cell
+    return candidates[0], True
+
+
+def consistent_cell_counts(
+    pack_voltage: float, minimum: float, maximum: float
+) -> list[int]:
+    """Every series count whose implied mean cell lies inside the cell bracket."""
+    return [
+        count
+        for count in range(MINIMUM_CELL_COUNT, MAXIMUM_CELL_COUNT + 1)
+        if minimum - CELL_BRACKET_MARGIN_V
+        <= pack_voltage / count
         <= maximum + CELL_BRACKET_MARGIN_V
-    ):
-        return fallback, False
-    return count, True
+    ]
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,6 +302,11 @@ class PolicyConfig:
     fallback_cell_count: int = 16
     cell_count: int = 16
     cell_count_detected: bool = False
+    # True when the count must no longer follow the live cell voltages: the
+    # operator configured it (CELL_COUNT), or it was measured once at
+    # qualification.  A pack does not change its series count while the
+    # driver runs, so a later reading that disagrees is bad data, not news.
+    cell_count_fixed: bool = False
     high_cell_protection_v: float = 3.65
     voltage_delta_warning_v: float = 1.0
     voltage_delta_alarm_v: float = 5.0
@@ -336,8 +348,33 @@ class PolicyConfig:
         """
         return round(self.blocked_charge_cell_v * self.cell_count, 3)
 
+    def with_cell_count(self, count: int) -> "PolicyConfig":
+        """Pin the series count; the live voltages no longer move it."""
+        return replace(
+            self,
+            cell_count=int(count),
+            fallback_cell_count=int(count),
+            cell_count_fixed=True,
+        )
+
+    def locked_to_pack(self, fields: dict[str, Any]) -> "PolicyConfig":
+        """Measure the count once and keep it, if it can be measured.
+
+        Used at qualification.  When the count cannot be measured the
+        configuration is returned unfixed, so it may still be measured later
+        from an unambiguous reading.
+        """
+        if self.cell_count_fixed:
+            return self
+        bound = self.for_pack(fields)
+        if not bound.cell_count_detected:
+            return bound
+        return replace(bound, cell_count_fixed=True)
+
     def for_pack(self, fields: dict[str, Any]) -> "PolicyConfig":
         """Return this configuration bound to the pack actually on the wire."""
+        if self.cell_count_fixed:
+            return self
         count, detected = detect_cell_count(fields, self.fallback_cell_count)
         if count == self.cell_count and detected == self.cell_count_detected:
             return self

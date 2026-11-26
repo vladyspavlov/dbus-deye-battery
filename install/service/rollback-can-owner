@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-root=/data/deye-virtual-battery
+root=${DEYE_ROOT:-/data/deye-virtual-battery}
 
 SERVICE_NAME=com.victronenergy.battery.deye_lv
 CAN_INTERFACE=can0
@@ -11,39 +11,82 @@ CAN_INTERFACE=can0
 
 virtual_service=$SERVICE_NAME
 stock_service=/service/can-bus-bms.$CAN_INTERFACE
-arm_file=/run/deye-virtual-battery/tx-armed
-persistent_marker=/data/deye-virtual-battery/can-tx-enabled
+arm_file=${DEYE_RUNTIME_DIR:-/run/deye-virtual-battery}/tx-armed
+persistent_marker=$root/can-tx-enabled
+stock_exe=/opt/victronenergy/can-bus-bms/can-bus-bms
+proc_root=${DEYE_PROC_ROOT:-/proc}
 
 read_value() {
     dbus -y "$1" "$2" GetValue 2>/dev/null | sed 's/^value = //'
 }
 
+# The CAN ports a stock driver process names: its runit service directory
+# (can-bus-bms.can0), or failing that an argument such as socketcan:can0.
+# Prints nothing when the process names no port.
+process_interfaces() {
+    directory=$(readlink "$1/cwd" 2>/dev/null || true)
+    directory=${directory##*/}
+    case "$directory" in
+        can-bus-bms.?*) echo "${directory#can-bus-bms.}"; return 0 ;;
+    esac
+    [ -r "$1/cmdline" ] || return 0
+    tr '\0' '\n' < "$1/cmdline" 2>/dev/null | sed 1d | while read -r argument; do
+        candidate=${argument##*:}
+        candidate=${candidate##*/}
+        candidate=${candidate#can-bus-bms.}
+        case "$candidate" in
+            can*|vcan*|slcan*) echo "$candidate" ;;
+        esac
+    done
+}
+
+# True for a stock driver on this port, or one that cannot be attributed to
+# any port.  A driver that only names another port is not ours (issue #15).
 stock_process_running() {
-    for process in /proc/[0-9]*; do
-        [ -e "$process/exe" ] || continue
+    for process in "$proc_root"/[0-9]*; do
+        [ -e "$process/exe" ] || [ -L "$process/exe" ] || continue
         executable=$(readlink "$process/exe" 2>/dev/null || true)
-        [ "$executable" = "/opt/victronenergy/can-bus-bms/can-bus-bms" ] && return 0
+        [ "$executable" = "$stock_exe" ] || continue
+        named=$(process_interfaces "$process")
+        [ -z "$named" ] && return 0
+        printf '%s\n' "$named" | grep -qx "$CAN_INTERFACE" && return 0
     done
     return 1
 }
 
 rm -f "$persistent_marker" "$arm_file"
 
+# The driver polls both markers every 50 ms and stops transmitting when either
+# is gone.  Wait for it to confirm.  If it does not answer at all (crashed,
+# crash-looping or hung), it cannot be asked: rollback used to stop here and
+# leave nobody sending the keepalive, the very case it exists for (issue #15).
+# With the markers removed a live driver cannot transmit past its next poll,
+# so give it that long and carry on restoring the stock driver.
 attempt=0
+owner=
 while [ "$attempt" -lt 20 ]; do
     owner=$(read_value "$virtual_service" /Diagnostics/CanTx/Owner || true)
     [ "$owner" = "0" ] && break
     attempt=$((attempt + 1))
     sleep 0.1
 done
-[ "$(read_value "$virtual_service" /Diagnostics/CanTx/Owner)" = "0" ]
+case "$owner" in
+    0) ;;
+    1)
+        echo "rollback failed: virtual driver still reports CAN ownership" >&2
+        exit 4
+        ;;
+    *)
+        echo "virtual driver not answering on D-Bus; markers removed, restoring the stock driver anyway" >&2
+        sleep 1
+        ;;
+esac
 
 svc -u "$stock_service"
 
 attempt=0
 while [ "$attempt" -lt 40 ]; do
-    stock=$(read_value "$virtual_service" /Diagnostics/CanTx/StockDriverRunning || true)
-    if [ "$stock" = "1" ] && stock_process_running; then
+    if stock_process_running; then
         echo "rollback complete: stock driver owns Deye keepalive"
         exit 0
     fi

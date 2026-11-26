@@ -15,6 +15,8 @@
 #   SERVICE_NAME=...     change only if you run more than one pack
 #   SHA256=<hex>         refuse the download unless it matches
 #   ALLOW_DOWNGRADE=1    permit installing older code than is running
+#   RESTART_SERVICE=0    on an upgrade, leave the running driver on the old
+#                        code until you restart it yourself
 #   DRY_RUN=1            show what would happen and stop
 #
 # Installing changes nothing about how your system charges or discharges.  The
@@ -48,6 +50,31 @@ fetch() {
     fi
 }
 
+# Every value below ends up in a sed expression and in a config file that
+# service/run sources as shell, so anything outside a plain character set is
+# refused before a single file is written (issue #15).
+matches() {
+    printf '%s\n' "$1" | grep -Eqx "$2"
+}
+
+validate_inputs() {
+    [ -z "${VERSION:-}" ] || matches "$VERSION" '[0-9]+(\.[0-9]+){1,3}' ||
+        fail "VERSION must look like 1.2.3, not '$VERSION'."
+    [ -z "${CAN_INTERFACE:-}" ] || matches "$CAN_INTERFACE" '[A-Za-z][A-Za-z0-9_.-]{0,14}' ||
+        fail "CAN_INTERFACE is not an interface name: '$CAN_INTERFACE'."
+    [ -z "${DEVICE_INSTANCE:-}" ] || matches "$DEVICE_INSTANCE" '[0-9]{1,5}' ||
+        fail "DEVICE_INSTANCE must be a number, not '$DEVICE_INSTANCE'."
+    [ -z "${AUTO_DEVICE_INSTANCE:-}" ] || matches "$AUTO_DEVICE_INSTANCE" '[01]' ||
+        fail "AUTO_DEVICE_INSTANCE must be 0 or 1, not '$AUTO_DEVICE_INSTANCE'."
+    [ -z "${SERVICE_NAME:-}" ] ||
+        matches "$SERVICE_NAME" 'com\.victronenergy\.battery\.[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*' ||
+        fail "SERVICE_NAME must be com.victronenergy.battery.<name>, not '$SERVICE_NAME'."
+    [ -z "${MODEL:-}" ] || matches "$MODEL" '[A-Za-z0-9][A-Za-z0-9 ._+()/-]{0,39}' ||
+        fail "MODEL may use letters, digits, spaces and . _ + ( ) / - only (40 at most)."
+    [ -z "${SHA256:-}" ] || matches "$SHA256" '[0-9a-fA-F]{64}' ||
+        fail "SHA256 must be 64 hex digits."
+}
+
 latest_version() {
     tmp=$1
     fetch "https://api.github.com/repos/$REPO/releases/latest" "$tmp" ||
@@ -79,9 +106,11 @@ compare_versions() {
 
 main() {
     require_venus
+    validate_inputs
 
-    work=$BASE/.deye-bootstrap.$$
-    mkdir -p "$work"
+    # An unpredictable name, created only if it does not already exist.
+    work=$(mktemp -d "$BASE/.deye-bootstrap.XXXXXX") ||
+        fail "Could not create a working directory under $BASE."
     # shellcheck disable=SC2064
     trap "rm -rf '$work'" EXIT HUP INT TERM
 
@@ -154,14 +183,19 @@ main() {
     # Keep the unpacked release: uninstall.sh and the rollback notes in the
     # README are written against a source tree, and the old ones are left
     # alone so an earlier release is always still on disk.
+    #
+    # A tree already kept for this same version is replaced by the download
+    # that was just verified.  It used to be reused as it was, so a damaged or
+    # altered copy on disk was what got installed (issue #15).
     kept=$BASE/dbus-deye-battery-$version
-    if [ ! -e "$kept" ]; then
-        cp -a "$source_dir" "$kept"
-    fi
+    rm -rf "$kept.new"
+    cp -a "$source_dir" "$kept.new"
+    rm -rf "$kept"
+    mv "$kept.new" "$kept"
     rm -f "$BASE/dbus-deye-battery"
     ln -s "$kept" "$BASE/dbus-deye-battery"
 
-    sh "$kept/install/install.sh"
+    RESTART_SERVICE=${RESTART_SERVICE:-1} sh "$kept/install/install.sh"
 
     # Settings are only seeded on a first install.  Rewriting them on an
     # upgrade could silently move a working system to a different CAN port or
